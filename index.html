@@ -148,9 +148,6 @@ textarea.input-field { resize: none; }
 
 #toast { display: none; position: fixed; top: 20px; background: #fff; color: #000; padding: 10px 24px; border-radius: 30px; font-size: 12px; z-index: 9999; font-weight: bold; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 </style>
-<!-- Browser-side MP4 converter: keeps the original 3:4 card ratio and creates H.264/AAC MP4 when MediaRecorder only gives WebM. -->
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
-<script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 </head>
 <body>
 
@@ -823,168 +820,66 @@ function downloadOriginalCanvas() {
 }
 
 // সম্পূর্ণ নিখুঁত ভিডিও এক্সপোর্ট ফাংশন (০ সেকেন্ডে খালি স্ক্রিন বা টেক্সট মিস হওয়ার সমস্যা সমাধান করা হয়েছে)
-let ffmpegInstance = null;
-let ffmpegLoadingPromise = null;
-
-async function getFFmpegConverter(toast) {
-    if (ffmpegInstance) return ffmpegInstance;
-    if (ffmpegLoadingPromise) return ffmpegLoadingPromise;
-
-    ffmpegLoadingPromise = (async () => {
-        if (!window.FFmpegWASM || typeof window.FFmpegWASM.FFmpeg !== 'function') {
-            throw new Error('FFmpeg library load হয়নি।');
-        }
-        if (!window.FFmpegUtil || typeof window.FFmpegUtil.toBlobURL !== 'function' || typeof window.FFmpegUtil.fetchFile !== 'function') {
-            throw new Error('FFmpeg utility library load হয়নি।');
-        }
-
-        const { FFmpeg } = window.FFmpegWASM;
-        const { toBlobURL } = window.FFmpegUtil;
-        const ffmpeg = new FFmpeg();
-        const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
-
-        if (toast) toast.innerText = 'MP4 encoder লোড হচ্ছে...';
-        await ffmpeg.load({
-            coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-            wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
-        });
-
-        ffmpegInstance = ffmpeg;
-        return ffmpeg;
-    })();
-
-    try { return await ffmpegLoadingPromise; }
-    finally { ffmpegLoadingPromise = null; }
-}
-
-async function convertWebMToMP4(webmBlob, toast) {
-    const ffmpeg = await getFFmpegConverter(toast);
-    const { fetchFile } = window.FFmpegUtil;
-    const inputName = `input_${Date.now()}.webm`;
-    const outputName = `output_${Date.now()}.mp4`;
-
-    await ffmpeg.writeFile(inputName, await fetchFile(webmBlob));
-
-    const onProgress = ({ progress }) => {
-        if (Number.isFinite(progress)) {
-            toast.innerText = `MP4 তৈরি হচ্ছে... ${Math.min(99, Math.max(1, Math.floor(progress * 100)))}%`;
-        }
-    };
-    ffmpeg.on('progress', onProgress);
-
-    try {
-        // Keep the FFmpeg command deliberately conservative for maximum browser/mobile compatibility.
-        await ffmpeg.exec([
-            '-i', inputName,
-            '-map', '0:v:0',
-            '-map', '0:a:0?',
-            '-c:v', 'libx264',
-            '-preset', 'veryfast',
-            '-crf', '22',
-            '-pix_fmt', 'yuv420p',
-            '-r', '30',
-            '-c:a', 'aac',
-            '-b:a', '160k',
-            '-ar', '48000',
-            '-ac', '2',
-            '-movflags', '+faststart',
-            '-map_metadata', '-1',
-            outputName
-        ]);
-
-        const data = await ffmpeg.readFile(outputName);
-        if (!data || !data.length) throw new Error('FFmpeg output empty');
-        return new Blob([data], { type: 'video/mp4' });
-    } finally {
-        ffmpeg.off('progress', onProgress);
-        try { await ffmpeg.deleteFile(inputName); } catch(e) {}
-        try { await ffmpeg.deleteFile(outputName); } catch(e) {}
-    }
-}
-
-// Export: original 3:4 ratio/layout stays unchanged.
-// If the browser records WebM, it is converted to H.264/AAC MP4 for YouTube/mobile preview compatibility.
 async function exportHDVideo() {
     const toast = document.getElementById('toast');
     const exportBtn = document.getElementById('exportVideoBtn');
+
     toast.innerText = 'ভিডিও তৈরি হচ্ছে... ০%';
     toast.style.display = 'block';
     exportBtn.disabled = true;
 
-    let audioCtx = null, tempAudio = null, mediaRecorder = null;
-    let progressTimer = null, stopTimer = null;
-
     try {
-        let durationSec;
-        if (currentMediaType === 'video' && uploadedVideo && Number.isFinite(uploadedVideo.duration) && uploadedVideo.duration > 0) {
-            durationSec = uploadedVideo.duration;
-        } else {
-            durationSec = Math.max(1, parseFloat(document.getElementById('videoDurationInput').value) || 10);
-        }
+        const durationSec = Math.max(
+            1,
+            Math.min(600, parseInt(document.getElementById('videoDurationInput').value) || 10)
+        );
 
-        // IMPORTANT: keep the original card ratio exactly as before: 360 x currentCardHeight (480 by default).
-        // Export is rendered at 3x for sharper text: 1080 x 1440 by default = 3:4.
+        // আগের 3:4 ratio রাখা হয়েছে — default 1080x1440
         const scale = 3;
-        const outputW = 360 * scale;
-        const outputH = currentCardHeight * scale;
-
         const recCanvas = document.createElement('canvas');
-        recCanvas.width = outputW;
-        recCanvas.height = outputH;
-        const rCtx = recCanvas.getContext('2d', { alpha: false, desynchronized: false });
+        recCanvas.width = 360 * scale;
+        recCanvas.height = currentCardHeight * scale;
+
+        const rCtx = recCanvas.getContext('2d', { alpha: false });
         rCtx.imageSmoothingEnabled = true;
         rCtx.imageSmoothingQuality = 'high';
 
+        // প্রথম ফ্রেম আগে থেকেই প্রস্তুত
         if (currentMediaType === 'video' && uploadedVideo) {
             uploadedVideo.pause();
+            uploadedVideo.currentTime = 0.1;
             await new Promise(resolve => {
                 let done = false;
                 const finish = () => {
-                    if (done) return;
-                    done = true;
-                    uploadedVideo.removeEventListener('seeked', finish);
-                    resolve();
-                };
-                uploadedVideo.addEventListener('seeked', finish, { once: true });
-                try { uploadedVideo.currentTime = 0; } catch(e) { finish(); }
-                setTimeout(finish, 1200);
-            });
-            if (uploadedVideo.readyState < 2) {
-                await new Promise(resolve => {
-                    const check = () => {
-                        if (uploadedVideo.readyState >= 2) {
-                            uploadedVideo.removeEventListener('loadeddata', check);
-                            resolve();
-                        }
-                    };
-                    uploadedVideo.addEventListener('loadeddata', check);
-                    setTimeout(() => {
-                        uploadedVideo.removeEventListener('loadeddata', check);
+                    if (!done) {
+                        done = true;
+                        uploadedVideo.onseeked = null;
                         resolve();
-                    }, 1500);
-                });
-            }
+                    }
+                };
+                uploadedVideo.onseeked = finish;
+                setTimeout(finish, 800);
+            });
         }
 
         if (bgAudioUrl) {
-            try { bgAudioEl.pause(); bgAudioEl.currentTime = 0; } catch(e) {}
+            bgAudioEl.pause();
+            bgAudioEl.currentTime = 0;
         }
 
-        const drawCard = (now) => {
-            rCtx.fillStyle = '#FFF6DB';
-            rCtx.fillRect(0, 0, outputW, outputH);
-            renderCardContent(rCtx, scale, now);
-        };
+        renderCardContent(rCtx, scale, performance.now());
 
-        // Prime frames first so the first recorded frame is never blank.
-        drawCard(performance.now());
-        await new Promise(requestAnimationFrame);
-        drawCard(performance.now());
+        if (!recCanvas.captureStream || !window.MediaRecorder) {
+            throw new Error('এই ব্রাউজারে ভিডিও রেকর্ডিং সাপোর্ট নেই');
+        }
 
-        const stream = recCanvas.captureStream(30);
+        const videoStream = recCanvas.captureStream(30);
         const combinedStream = new MediaStream();
-        stream.getVideoTracks().forEach(t => combinedStream.addTrack(t));
 
+        videoStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
+
+        // Audio — সমস্যা হলে export বন্ধ হবে না
+        let audioCtx = null;
         try {
             const AudioClass = window.AudioContext || window.webkitAudioContext;
             if (AudioClass) {
@@ -993,188 +888,160 @@ async function exportHDVideo() {
                 let hasAudio = false;
 
                 if (bgAudioUrl) {
-                    tempAudio = document.createElement('audio');
-                    tempAudio.src = bgAudioUrl;
-                    tempAudio.preload = 'auto';
-                    const aSrc = audioCtx.createMediaElementSource(tempAudio);
-                    aSrc.connect(dest);
+                    const audioSource = audioCtx.createMediaElementSource(bgAudioEl);
+                    audioSource.connect(dest);
                     hasAudio = true;
+                    bgAudioEl.currentTime = 0;
+                    await bgAudioEl.play().catch(() => {});
                 }
 
-                if (currentMediaType === 'video' && uploadedVideo && uploadedVideo.src && !isVideoSoundMuted) {
-                    const vStream = uploadedVideo.captureStream
-                        ? uploadedVideo.captureStream()
-                        : (uploadedVideo.mozCaptureStream ? uploadedVideo.mozCaptureStream() : null);
-                    if (vStream && vStream.getAudioTracks().length) {
-                        audioCtx.createMediaStreamSource(vStream).connect(dest);
+                if (
+                    currentMediaType === 'video' &&
+                    uploadedVideo &&
+                    uploadedVideo.src &&
+                    !isVideoSoundMuted &&
+                    uploadedVideo.captureStream
+                ) {
+                    const vStream = uploadedVideo.captureStream();
+                    if (vStream.getAudioTracks().length) {
+                        const vSource = audioCtx.createMediaStreamSource(vStream);
+                        vSource.connect(dest);
                         hasAudio = true;
                     }
                 }
 
-                if (hasAudio) dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+                if (hasAudio) {
+                    dest.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+                }
+                if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
             }
-        } catch(e) {
-            console.warn('Audio mixing:', e);
+        } catch (audioError) {
+            console.warn('Audio skipped:', audioError);
         }
 
-        // Browser-native MP4 if available; otherwise record WebM first, then convert to MP4.
-        let mimeType = '';
+        // Browser যে format সত্যিই support করে সেটাই ব্যবহার করা হবে
         const candidates = [
-            'video/webm;codecs=vp8,opus',
-            'video/webm;codecs=vp9,opus',
-            'video/mp4;codecs=avc1.640028,mp4a.40.2',
+            'video/webm;codecs=vp8',
+            'video/webm',
             'video/mp4;codecs=avc1,mp4a.40.2',
             'video/mp4'
         ];
+
+        let mimeType = '';
         for (const type of candidates) {
             if (MediaRecorder.isTypeSupported(type)) {
                 mimeType = type;
                 break;
             }
         }
-        if (!mimeType) throw new Error('এই ব্রাউজারে supported video format পাওয়া যায়নি।');
 
-        mediaRecorder = new MediaRecorder(combinedStream, {
+        if (!mimeType) throw new Error('ভিডিও format পাওয়া যায়নি');
+
+        const recorder = new MediaRecorder(combinedStream, {
             mimeType,
-            videoBitsPerSecond: 16000000,
-            audioBitsPerSecond: 256000
+            videoBitsPerSecond: 8000000,
+            audioBitsPerSecond: 160000
         });
 
         const chunks = [];
-        mediaRecorder.ondataavailable = e => {
-            if (e.data && e.data.size) chunks.push(e.data);
+        recorder.ondataavailable = e => {
+            if (e.data && e.data.size > 0) chunks.push(e.data);
         };
 
-        let isRecording = true;
-        const startTime = performance.now();
+        let stopped = false;
+        const startedAt = performance.now();
 
-        function recordLoop(now) {
-            if (!isRecording) return;
-            drawCard(now);
-            requestAnimationFrame(recordLoop);
-        }
-
-        mediaRecorder.onstop = async () => {
-            isRecording = false;
-            if (progressTimer) clearInterval(progressTimer);
-            if (stopTimer) clearTimeout(stopTimer);
-
-            try {
-                const recordedMime = mediaRecorder.mimeType || mimeType;
-                let finalBlob = new Blob(chunks, { type: recordedMime });
-
-                // If browser produced WebM, convert it to MP4 (H.264 + AAC + faststart).
-                if (!recordedMime.includes('mp4')) {
-                    toast.innerText = 'YouTube-এর জন্য MP4 তৈরি হচ্ছে...';
-                    finalBlob = await convertWebMToMP4(finalBlob, toast);
-                } else if (finalBlob.type !== 'video/mp4') {
-                    finalBlob = new Blob([finalBlob], { type: 'video/mp4' });
-                }
-
-                const fileName = `Poetry_Card_${Date.now()}.mp4`;
-                const file = new File([finalBlob], fileName, { type: 'video/mp4' });
-                const url = URL.createObjectURL(finalBlob);
-
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = fileName;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-
-                if (navigator.share && (!navigator.canShare || navigator.canShare({ files: [file] }))) {
-                    const shareBtn = document.createElement('button');
-                    shareBtn.textContent = '📤 SHARE MP4 VIDEO';
-                    shareBtn.style.cssText = 'position:fixed;left:50%;bottom:25px;transform:translateX(-50%);z-index:99999;padding:13px 20px;border:0;border-radius:12px;background:#111;color:#fff;font-size:14px;font-weight:700;box-shadow:0 6px 25px rgba(0,0,0,.25);cursor:pointer;';
-                    shareBtn.onclick = async () => {
-                        try { await navigator.share({ files: [file], title: 'Poetry Video' }); }
-                        catch(e) {}
-                        shareBtn.remove();
-                    };
-                    document.body.appendChild(shareBtn);
-                    setTimeout(() => shareBtn.remove(), 15000);
-                }
-
-                setTimeout(() => URL.revokeObjectURL(url), 10000);
-                if (tempAudio) { try { tempAudio.pause(); tempAudio.src = ''; } catch(e) {} }
-                if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
-                if (currentMediaType === 'video' && uploadedVideo) {
-                    uploadedVideo.pause();
-                    try { uploadedVideo.currentTime = 0; } catch(e) {}
-                }
-
-                toast.innerText = '3:4 MP4 ভিডিও সফলভাবে এক্সপোর্ট হয়েছে ✅';
-                setTimeout(() => toast.style.display = 'none', 4000);
-                exportBtn.disabled = false;
-            } catch (err) {
-                // MP4 conversion can fail when the page is opened directly as file://
-                // or when the browser blocks the FFmpeg WASM worker. Never lose the
-                // rendered video: fall back to the original browser-recorded WebM.
-                console.error('MP4 conversion failed; falling back to WebM:', err);
-                try {
-                    const fallbackBlob = new Blob(chunks, { type: recordedMime || 'video/webm' });
-                    if (!fallbackBlob.size) throw new Error('Recorded video is empty');
-
-                    const fallbackName = `Poetry_Card_${Date.now()}.webm`;
-                    const fallbackUrl = URL.createObjectURL(fallbackBlob);
-                    const fallbackLink = document.createElement('a');
-                    fallbackLink.href = fallbackUrl;
-                    fallbackLink.download = fallbackName;
-                    document.body.appendChild(fallbackLink);
-                    fallbackLink.click();
-                    fallbackLink.remove();
-                    setTimeout(() => URL.revokeObjectURL(fallbackUrl), 10000);
-
-                    if (tempAudio) { try { tempAudio.pause(); tempAudio.src = ''; } catch(e) {} }
-                    if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
-                    if (currentMediaType === 'video' && uploadedVideo) {
-                        uploadedVideo.pause();
-                        try { uploadedVideo.currentTime = 0; } catch(e) {}
-                    }
-
-                    toast.innerText = 'ভিডিও ডাউনলোড হয়েছে (WebM)। MP4 conversion চালু করা যায়নি।';
-                    setTimeout(() => toast.style.display = 'none', 5000);
-                } catch (fallbackErr) {
-                    console.error('Video fallback download failed:', fallbackErr);
-                    toast.innerText = 'ভিডিও ডাউনলোড করতে সমস্যা হয়েছে।';
-                    setTimeout(() => toast.style.display = 'none', 5000);
-                }
-                exportBtn.disabled = false;
-            }
+        const renderLoop = () => {
+            if (stopped) return;
+            renderCardContent(rCtx, scale, performance.now());
+            requestAnimationFrame(renderLoop);
         };
 
-        // Last complete frame immediately before recording starts.
-        drawCard(performance.now());
-        mediaRecorder.start(100);
-
+        // video source চালু
         if (currentMediaType === 'video' && uploadedVideo) {
-            try { uploadedVideo.currentTime = 0; } catch(e) {}
-            uploadedVideo.play().catch(() => {});
+            uploadedVideo.currentTime = 0.1;
+            await uploadedVideo.play().catch(() => {});
         }
-        if (tempAudio) {
-            tempAudio.currentTime = 0;
-            tempAudio.play().catch(() => {});
+
+        recorder.start(1000);
+        renderLoop();
+
+        const progressTimer = setInterval(() => {
+            const elapsed = (performance.now() - startedAt) / 1000;
+            const pct = Math.min(99, Math.floor((elapsed / durationSec) * 100));
+            toast.innerText = `ভিডিও তৈরি হচ্ছে... ${pct}%`;
+        }, 200);
+
+        await new Promise(resolve => setTimeout(resolve, durationSec * 1000));
+
+        clearInterval(progressTimer);
+        stopped = true;
+
+        await new Promise(resolve => {
+            recorder.onstop = resolve;
+            if (recorder.state !== 'inactive') recorder.stop();
+            else resolve();
+        });
+
+        const finalType = recorder.mimeType || mimeType;
+        const blob = new Blob(chunks, { type: finalType });
+
+        if (!blob || blob.size < 1000) {
+            throw new Error('ভিডিও ফাইল empty হয়েছে');
         }
-        requestAnimationFrame(recordLoop);
 
-        progressTimer = setInterval(() => {
-            const elapsed = (performance.now() - startTime) / 1000;
-            toast.innerText = `ভিডিও তৈরি হচ্ছে... ${Math.min(99, Math.floor((elapsed / durationSec) * 100))}%`;
-        }, 100);
+        // Download করার জন্য visible button — mobile-এ বেশি reliable
+        const url = URL.createObjectURL(blob);
 
-        stopTimer = setTimeout(() => {
-            isRecording = false;
-            if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-        }, Math.max(1000, durationSec * 1000));
+        const old = document.getElementById('videoDownloadBox');
+        if (old) old.remove();
+
+        const box = document.createElement('div');
+        box.id = 'videoDownloadBox';
+        box.style.cssText =
+            'position:fixed;left:50%;bottom:25px;transform:translateX(-50%);' +
+            'z-index:10000;background:#fff;padding:12px;border-radius:12px;' +
+            'box-shadow:0 10px 30px rgba(0,0,0,.5);width:min(90%,360px);text-align:center;';
+
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.innerText = '⬇️ DOWNLOAD VIDEO';
+        btn.style.cssText =
+            'width:100%;padding:14px;border:0;border-radius:9px;background:#e60000;' +
+            'color:#fff;font-size:15px;font-weight:700;cursor:pointer;';
+
+        btn.onclick = () => {
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Poetry_Video_${Date.now()}.webm`;
+            link.style.display = 'none';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+
+            // iOS/কিছু Android browser-এ link click block হলে নতুন tab খুলবে
+            setTimeout(() => {
+                try { window.open(url, '_blank'); } catch(e) {}
+            }, 300);
+
+            toast.innerText = 'ভিডিও ডাউনলোড শুরু হয়েছে';
+            setTimeout(() => toast.style.display = 'none', 2500);
+        };
+
+        box.appendChild(btn);
+        document.body.appendChild(box);
+
+        toast.innerText = 'ভিডিও তৈরি হয়েছে — DOWNLOAD VIDEO চাপুন';
+        exportBtn.disabled = false;
+
+        if (audioCtx && audioCtx.state !== 'closed') {
+            audioCtx.close().catch(() => {});
+        }
 
     } catch (err) {
         console.error('Video export error:', err);
-        if (progressTimer) clearInterval(progressTimer);
-        if (stopTimer) clearTimeout(stopTimer);
-        if (tempAudio) { try { tempAudio.pause(); tempAudio.src = ''; } catch(e) {} }
-        if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
-        toast.innerText = 'ভিডিও তৈরি করতে সমস্যা হয়েছে';
-        setTimeout(() => toast.style.display = 'none', 3000);
+        toast.innerText = 'ভিডিও তৈরি করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।';
+        setTimeout(() => toast.style.display = 'none', 3500);
         exportBtn.disabled = false;
     }
 }
