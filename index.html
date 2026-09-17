@@ -149,7 +149,7 @@ textarea.input-field { resize: none; }
 #toast { display: none; position: fixed; top: 20px; background: #fff; color: #000; padding: 10px 24px; border-radius: 30px; font-size: 12px; z-index: 9999; font-weight: bold; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
 </style>
 <!-- Browser-side MP4 converter: keeps the original 3:4 card ratio and creates H.264/AAC MP4 when MediaRecorder only gives WebM. -->
-<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.15/dist/umd/ffmpeg.min.js"></script>
+<script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/umd/ffmpeg.min.js"></script>
 <script src="https://unpkg.com/@ffmpeg/util@0.12.1/dist/umd/index.js"></script>
 </head>
 <body>
@@ -826,23 +826,24 @@ function downloadOriginalCanvas() {
 let ffmpegInstance = null;
 let ffmpegLoadingPromise = null;
 
-async function getFFmpegConverter() {
-    if (ffmpegInstance && ffmpegInstance.loaded) return ffmpegInstance;
+async function getFFmpegConverter(toast) {
+    if (ffmpegInstance) return ffmpegInstance;
     if (ffmpegLoadingPromise) return ffmpegLoadingPromise;
 
     ffmpegLoadingPromise = (async () => {
-        if (!window.FFmpegWASM || !window.FFmpegWASM.FFmpeg) {
-            throw new Error('MP4 converter library load হয়নি।');
+        if (!window.FFmpegWASM || typeof window.FFmpegWASM.FFmpeg !== 'function') {
+            throw new Error('FFmpeg library load হয়নি।');
         }
-        if (!window.FFmpegUtil || !window.FFmpegUtil.toBlobURL || !window.FFmpegUtil.fetchFile) {
+        if (!window.FFmpegUtil || typeof window.FFmpegUtil.toBlobURL !== 'function' || typeof window.FFmpegUtil.fetchFile !== 'function') {
             throw new Error('FFmpeg utility library load হয়নি।');
         }
 
         const { FFmpeg } = window.FFmpegWASM;
         const { toBlobURL } = window.FFmpegUtil;
         const ffmpeg = new FFmpeg();
-
         const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/umd';
+
+        if (toast) toast.innerText = 'MP4 encoder লোড হচ্ছে...';
         await ffmpeg.load({
             coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
             wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm')
@@ -852,47 +853,53 @@ async function getFFmpegConverter() {
         return ffmpeg;
     })();
 
-    try {
-        return await ffmpegLoadingPromise;
-    } finally {
-        ffmpegLoadingPromise = null;
-    }
+    try { return await ffmpegLoadingPromise; }
+    finally { ffmpegLoadingPromise = null; }
 }
 
 async function convertWebMToMP4(webmBlob, toast) {
-    const ffmpeg = await getFFmpegConverter();
+    const ffmpeg = await getFFmpegConverter(toast);
     const { fetchFile } = window.FFmpegUtil;
-
-    const inputName = `poetry_input_${Date.now()}.webm`;
-    const outputName = `poetry_output_${Date.now()}.mp4`;
+    const inputName = `input_${Date.now()}.webm`;
+    const outputName = `output_${Date.now()}.mp4`;
 
     await ffmpeg.writeFile(inputName, await fetchFile(webmBlob));
 
-    ffmpeg.on('progress', ({ progress }) => {
+    const onProgress = ({ progress }) => {
         if (Number.isFinite(progress)) {
             toast.innerText = `MP4 তৈরি হচ্ছে... ${Math.min(99, Math.max(1, Math.floor(progress * 100)))}%`;
         }
-    });
+    };
+    ffmpeg.on('progress', onProgress);
 
-    await ffmpeg.exec([
-        '-i', inputName,
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-crf', '20',
-        '-pix_fmt', 'yuv420p',
-        '-c:a', 'aac',
-        '-b:a', '192k',
-        '-ar', '48000',
-        '-movflags', '+faststart',
-        outputName
-    ]);
+    try {
+        // Keep the FFmpeg command deliberately conservative for maximum browser/mobile compatibility.
+        await ffmpeg.exec([
+            '-i', inputName,
+            '-map', '0:v:0',
+            '-map', '0:a:0?',
+            '-c:v', 'libx264',
+            '-preset', 'veryfast',
+            '-crf', '22',
+            '-pix_fmt', 'yuv420p',
+            '-r', '30',
+            '-c:a', 'aac',
+            '-b:a', '160k',
+            '-ar', '48000',
+            '-ac', '2',
+            '-movflags', '+faststart',
+            '-map_metadata', '-1',
+            outputName
+        ]);
 
-    const data = await ffmpeg.readFile(outputName);
-
-    try { await ffmpeg.deleteFile(inputName); } catch(e) {}
-    try { await ffmpeg.deleteFile(outputName); } catch(e) {}
-
-    return new Blob([data.buffer], { type: 'video/mp4' });
+        const data = await ffmpeg.readFile(outputName);
+        if (!data || !data.length) throw new Error('FFmpeg output empty');
+        return new Blob([data], { type: 'video/mp4' });
+    } finally {
+        ffmpeg.off('progress', onProgress);
+        try { await ffmpeg.deleteFile(inputName); } catch(e) {}
+        try { await ffmpeg.deleteFile(outputName); } catch(e) {}
+    }
 }
 
 // Export: original 3:4 ratio/layout stays unchanged.
@@ -1013,11 +1020,11 @@ async function exportHDVideo() {
         // Browser-native MP4 if available; otherwise record WebM first, then convert to MP4.
         let mimeType = '';
         const candidates = [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp9,opus',
             'video/mp4;codecs=avc1.640028,mp4a.40.2',
             'video/mp4;codecs=avc1,mp4a.40.2',
-            'video/mp4',
-            'video/webm;codecs=vp9,opus',
-            'video/webm;codecs=vp8,opus'
+            'video/mp4'
         ];
         for (const type of candidates) {
             if (MediaRecorder.isTypeSupported(type)) {
@@ -1060,6 +1067,8 @@ async function exportHDVideo() {
                 if (!recordedMime.includes('mp4')) {
                     toast.innerText = 'YouTube-এর জন্য MP4 তৈরি হচ্ছে...';
                     finalBlob = await convertWebMToMP4(finalBlob, toast);
+                } else if (finalBlob.type !== 'video/mp4') {
+                    finalBlob = new Blob([finalBlob], { type: 'video/mp4' });
                 }
 
                 const fileName = `Poetry_Card_${Date.now()}.mp4`;
@@ -1098,9 +1107,38 @@ async function exportHDVideo() {
                 setTimeout(() => toast.style.display = 'none', 4000);
                 exportBtn.disabled = false;
             } catch (err) {
-                console.error('MP4 conversion error:', err);
-                toast.innerText = 'MP4 তৈরি করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।';
-                setTimeout(() => toast.style.display = 'none', 5000);
+                // MP4 conversion can fail when the page is opened directly as file://
+                // or when the browser blocks the FFmpeg WASM worker. Never lose the
+                // rendered video: fall back to the original browser-recorded WebM.
+                console.error('MP4 conversion failed; falling back to WebM:', err);
+                try {
+                    const fallbackBlob = new Blob(chunks, { type: recordedMime || 'video/webm' });
+                    if (!fallbackBlob.size) throw new Error('Recorded video is empty');
+
+                    const fallbackName = `Poetry_Card_${Date.now()}.webm`;
+                    const fallbackUrl = URL.createObjectURL(fallbackBlob);
+                    const fallbackLink = document.createElement('a');
+                    fallbackLink.href = fallbackUrl;
+                    fallbackLink.download = fallbackName;
+                    document.body.appendChild(fallbackLink);
+                    fallbackLink.click();
+                    fallbackLink.remove();
+                    setTimeout(() => URL.revokeObjectURL(fallbackUrl), 10000);
+
+                    if (tempAudio) { try { tempAudio.pause(); tempAudio.src = ''; } catch(e) {} }
+                    if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
+                    if (currentMediaType === 'video' && uploadedVideo) {
+                        uploadedVideo.pause();
+                        try { uploadedVideo.currentTime = 0; } catch(e) {}
+                    }
+
+                    toast.innerText = 'ভিডিও ডাউনলোড হয়েছে (WebM)। MP4 conversion চালু করা যায়নি।';
+                    setTimeout(() => toast.style.display = 'none', 5000);
+                } catch (fallbackErr) {
+                    console.error('Video fallback download failed:', fallbackErr);
+                    toast.innerText = 'ভিডিও ডাউনলোড করতে সমস্যা হয়েছে।';
+                    setTimeout(() => toast.style.display = 'none', 5000);
+                }
                 exportBtn.disabled = false;
             }
         };
