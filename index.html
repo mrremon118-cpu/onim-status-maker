@@ -824,9 +824,23 @@ async function exportHDVideo() {
     const toast = document.getElementById('toast');
     const exportBtn = document.getElementById('exportVideoBtn');
 
+    // Prevent a second export while one is already running.
+    if (window.__videoExportRunning) return;
+    window.__videoExportRunning = true;
+
     toast.innerText = 'ভিডিও তৈরি হচ্ছে... ০%';
     toast.style.display = 'block';
     exportBtn.disabled = true;
+
+    let recorder = null;
+    let combinedStream = null;
+    let videoStream = null;
+    let audioCtx = null;
+    let exportAudioEl = null;
+    let downloadUrl = null;
+    let renderStopped = false;
+    let progressTimer = null;
+    let rafId = null;
 
     try {
         const durationSec = Math.max(
@@ -834,7 +848,7 @@ async function exportHDVideo() {
             Math.min(600, parseInt(document.getElementById('videoDurationInput').value) || 10)
         );
 
-        // আগের 3:4 ratio রাখা হয়েছে — default 1080x1440
+        // KEEP ORIGINAL 3:4 RATIO
         const scale = 3;
         const recCanvas = document.createElement('canvas');
         recCanvas.width = 360 * scale;
@@ -844,27 +858,23 @@ async function exportHDVideo() {
         rCtx.imageSmoothingEnabled = true;
         rCtx.imageSmoothingQuality = 'high';
 
-        // প্রথম ফ্রেম আগে থেকেই প্রস্তুত
+        // Prepare the first video frame.
         if (currentMediaType === 'video' && uploadedVideo) {
             uploadedVideo.pause();
-            uploadedVideo.currentTime = 0.1;
-            await new Promise(resolve => {
-                let done = false;
-                const finish = () => {
-                    if (!done) {
-                        done = true;
-                        uploadedVideo.onseeked = null;
+            try {
+                uploadedVideo.currentTime = 0.1;
+                await new Promise(resolve => {
+                    let finished = false;
+                    const finish = () => {
+                        if (finished) return;
+                        finished = true;
+                        uploadedVideo.removeEventListener('seeked', finish);
                         resolve();
-                    }
-                };
-                uploadedVideo.onseeked = finish;
-                setTimeout(finish, 800);
-            });
-        }
-
-        if (bgAudioUrl) {
-            bgAudioEl.pause();
-            bgAudioEl.currentTime = 0;
+                    };
+                    uploadedVideo.addEventListener('seeked', finish, { once: true });
+                    setTimeout(finish, 1000);
+                });
+            } catch (_) {}
         }
 
         renderCardContent(rCtx, scale, performance.now());
@@ -873,71 +883,91 @@ async function exportHDVideo() {
             throw new Error('এই ব্রাউজারে ভিডিও রেকর্ডিং সাপোর্ট নেই');
         }
 
-        const videoStream = recCanvas.captureStream(30);
-        const combinedStream = new MediaStream();
+        videoStream = recCanvas.captureStream(30);
+        combinedStream = new MediaStream();
 
-        videoStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
+        videoStream.getVideoTracks().forEach(track => {
+            combinedStream.addTrack(track);
+        });
 
-        // Audio — সমস্যা হলে export বন্ধ হবে না
-        let audioCtx = null;
+        /*
+         * Audio:
+         * Create a NEW temporary audio element every export.
+         * This avoids the "MediaElementSource already connected" error
+         * that can happen on the 2nd/3rd export.
+         */
         try {
             const AudioClass = window.AudioContext || window.webkitAudioContext;
-            if (AudioClass) {
+
+            if (AudioClass && bgAudioUrl) {
                 audioCtx = new AudioClass();
+
+                exportAudioEl = document.createElement('audio');
+                exportAudioEl.src = bgAudioUrl;
+                exportAudioEl.preload = 'auto';
+                exportAudioEl.loop = true;
+                exportAudioEl.playsInline = true;
+                exportAudioEl.muted = false;
+                document.body.appendChild(exportAudioEl);
+
                 const dest = audioCtx.createMediaStreamDestination();
-                let hasAudio = false;
+                const source = audioCtx.createMediaElementSource(exportAudioEl);
+                source.connect(dest);
 
-                if (bgAudioUrl) {
-                    const audioSource = audioCtx.createMediaElementSource(bgAudioEl);
-                    audioSource.connect(dest);
-                    hasAudio = true;
-                    bgAudioEl.currentTime = 0;
-                    await bgAudioEl.play().catch(() => {});
+                if (audioCtx.state === 'suspended') {
+                    await audioCtx.resume().catch(() => {});
                 }
 
-                if (
-                    currentMediaType === 'video' &&
-                    uploadedVideo &&
-                    uploadedVideo.src &&
-                    !isVideoSoundMuted &&
-                    uploadedVideo.captureStream
-                ) {
-                    const vStream = uploadedVideo.captureStream();
-                    if (vStream.getAudioTracks().length) {
-                        const vSource = audioCtx.createMediaStreamSource(vStream);
-                        vSource.connect(dest);
-                        hasAudio = true;
-                    }
-                }
+                exportAudioEl.currentTime = 0;
+                await exportAudioEl.play().catch(() => {});
 
-                if (hasAudio) {
-                    dest.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
-                }
-                if (audioCtx.state === 'suspended') await audioCtx.resume().catch(() => {});
+                dest.stream.getAudioTracks().forEach(track => {
+                    combinedStream.addTrack(track);
+                });
+            } else if (
+                AudioClass &&
+                currentMediaType === 'video' &&
+                uploadedVideo &&
+                !isVideoSoundMuted &&
+                uploadedVideo.captureStream
+            ) {
+                // If no background audio is selected, keep the uploaded
+                // video's original sound when the browser exposes it.
+                const vStream = uploadedVideo.captureStream();
+                vStream.getAudioTracks().forEach(track => {
+                    combinedStream.addTrack(track);
+                });
             }
         } catch (audioError) {
             console.warn('Audio skipped:', audioError);
         }
 
-        // Browser যে format সত্যিই support করে সেটাই ব্যবহার করা হবে
+        /*
+         * IMPORTANT:
+         * Prefer REAL MP4 first. WebM is kept only as a browser fallback.
+         * This greatly improves compatibility with Android Gallery/YouTube.
+         */
         const candidates = [
-            'video/webm;codecs=vp8',
-            'video/webm',
+            'video/mp4;codecs="avc1.4D401F,mp4a.40.2"',
             'video/mp4;codecs=avc1,mp4a.40.2',
-            'video/mp4'
+            'video/mp4',
+            'video/webm;codecs=vp8,opus',
+            'video/webm'
         ];
 
         let mimeType = '';
         for (const type of candidates) {
-            if (MediaRecorder.isTypeSupported(type)) {
-                mimeType = type;
-                break;
-            }
+            try {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    mimeType = type;
+                    break;
+                }
+            } catch (_) {}
         }
 
         if (!mimeType) throw new Error('ভিডিও format পাওয়া যায়নি');
 
-        const recorder = new MediaRecorder(combinedStream, {
+        recorder = new MediaRecorder(combinedStream, {
             mimeType,
             videoBitsPerSecond: 8000000,
             audioBitsPerSecond: 160000
@@ -948,25 +978,27 @@ async function exportHDVideo() {
             if (e.data && e.data.size > 0) chunks.push(e.data);
         };
 
-        let stopped = false;
         const startedAt = performance.now();
 
         const renderLoop = () => {
-            if (stopped) return;
+            if (renderStopped) return;
             renderCardContent(rCtx, scale, performance.now());
-            requestAnimationFrame(renderLoop);
+            rafId = requestAnimationFrame(renderLoop);
         };
 
-        // video source চালু
+        // Start the source video from the beginning.
         if (currentMediaType === 'video' && uploadedVideo) {
-            uploadedVideo.currentTime = 0.1;
-            await uploadedVideo.play().catch(() => {});
+            try {
+                uploadedVideo.currentTime = 0.1;
+                await uploadedVideo.play();
+            } catch (_) {}
         }
 
+        // Start recording only after the first frame is already drawn.
         recorder.start(1000);
         renderLoop();
 
-        const progressTimer = setInterval(() => {
+        progressTimer = setInterval(() => {
             const elapsed = (performance.now() - startedAt) / 1000;
             const pct = Math.min(99, Math.floor((elapsed / durationSec) * 100));
             toast.innerText = `ভিডিও তৈরি হচ্ছে... ${pct}%`;
@@ -975,24 +1007,37 @@ async function exportHDVideo() {
         await new Promise(resolve => setTimeout(resolve, durationSec * 1000));
 
         clearInterval(progressTimer);
-        stopped = true;
+        progressTimer = null;
+        renderStopped = true;
+        if (rafId) cancelAnimationFrame(rafId);
+
+        // Ask MediaRecorder for its final chunk before stopping.
+        if (recorder.state !== 'inactive') {
+            recorder.requestData();
+            await new Promise(resolve => setTimeout(resolve, 80));
+        }
 
         await new Promise(resolve => {
-            recorder.onstop = resolve;
-            if (recorder.state !== 'inactive') recorder.stop();
-            else resolve();
+            if (!recorder || recorder.state === 'inactive') {
+                resolve();
+                return;
+            }
+            recorder.addEventListener('stop', resolve, { once: true });
+            recorder.stop();
         });
 
         const finalType = recorder.mimeType || mimeType;
+        const isMp4 = finalType.toLowerCase().includes('mp4');
+        const extension = isMp4 ? 'mp4' : 'webm';
         const blob = new Blob(chunks, { type: finalType });
 
         if (!blob || blob.size < 1000) {
             throw new Error('ভিডিও ফাইল empty হয়েছে');
         }
 
-        // Download করার জন্য visible button — mobile-এ বেশি reliable
-        const url = URL.createObjectURL(blob);
+        downloadUrl = URL.createObjectURL(blob);
 
+        // Replace the previous download box.
         const old = document.getElementById('videoDownloadBox');
         if (old) old.remove();
 
@@ -1001,48 +1046,139 @@ async function exportHDVideo() {
         box.style.cssText =
             'position:fixed;left:50%;bottom:25px;transform:translateX(-50%);' +
             'z-index:10000;background:#fff;padding:12px;border-radius:12px;' +
-            'box-shadow:0 10px 30px rgba(0,0,0,.5);width:min(90%,360px);text-align:center;';
+            'box-shadow:0 10px 30px rgba(0,0,0,.5);width:min(92%,360px);text-align:center;';
 
-        const btn = document.createElement('button');
-        btn.type = 'button';
+        const info = document.createElement('div');
+        info.innerText = `ভিডিও প্রস্তুত (${extension.toUpperCase()})`;
+        info.style.cssText =
+            'color:#111;font-size:12px;font-weight:700;margin-bottom:8px;';
+
+        const btn = document.createElement('a');
+        btn.href = downloadUrl;
+        btn.download = `Poetry_Video_${Date.now()}.${extension}`;
         btn.innerText = '⬇️ DOWNLOAD VIDEO';
         btn.style.cssText =
-            'width:100%;padding:14px;border:0;border-radius:9px;background:#e60000;' +
-            'color:#fff;font-size:15px;font-weight:700;cursor:pointer;';
+            'display:block;width:100%;padding:14px;border-radius:9px;' +
+            'background:#e60000;color:#fff;font-size:15px;font-weight:700;' +
+            'text-decoration:none;cursor:pointer;';
 
-        btn.onclick = () => {
-            const link = document.createElement('a');
-            link.href = url;
-            link.download = `Poetry_Video_${Date.now()}.webm`;
-            link.style.display = 'none';
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-
-            // iOS/কিছু Android browser-এ link click block হলে নতুন tab খুলবে
-            setTimeout(() => {
-                try { window.open(url, '_blank'); } catch(e) {}
-            }, 300);
-
+        // Keep the Blob URL alive until the user starts another export.
+        btn.addEventListener('click', () => {
             toast.innerText = 'ভিডিও ডাউনলোড শুরু হয়েছে';
             setTimeout(() => toast.style.display = 'none', 2500);
+        });
+
+        // OPEN VIDEO: use an in-page video player instead of window.open().
+        // This works more reliably on Android/mobile browsers and file:// pages.
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.innerText = '▶️ OPEN VIDEO';
+        openBtn.style.cssText =
+            'display:block;width:100%;margin-top:7px;padding:10px;border:0;' +
+            'border-radius:8px;background:#eee;color:#111;font-size:12px;' +
+            'font-weight:700;cursor:pointer;';
+
+        openBtn.onclick = () => {
+            const modal = document.createElement('div');
+            modal.style.cssText =
+                'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.92);' +
+                'display:flex;align-items:center;justify-content:center;padding:16px;';
+
+            const wrap = document.createElement('div');
+            wrap.style.cssText =
+                'width:min(100%,420px);position:relative;text-align:center;';
+
+            const player = document.createElement('video');
+            player.src = downloadUrl;
+            player.controls = true;
+            player.autoplay = true;
+            player.playsInline = true;
+            player.setAttribute('playsinline', '');
+            player.style.cssText =
+                'display:block;width:100%;max-height:82vh;background:#000;border-radius:10px;';
+
+            const close = document.createElement('button');
+            close.type = 'button';
+            close.innerText = '✕ CLOSE';
+            close.style.cssText =
+                'margin-top:10px;padding:10px 18px;border:0;border-radius:8px;' +
+                'background:#fff;color:#111;font-weight:700;cursor:pointer;';
+
+            const closeModal = () => {
+                try { player.pause(); } catch (_) {}
+                modal.remove();
+            };
+            close.onclick = closeModal;
+            modal.onclick = e => { if (e.target === modal) closeModal(); };
+
+            wrap.appendChild(player);
+            wrap.appendChild(close);
+            modal.appendChild(wrap);
+            document.body.appendChild(modal);
+
+            player.play().catch(() => {});
         };
 
+        box.appendChild(info);
         box.appendChild(btn);
+        box.appendChild(openBtn);
         document.body.appendChild(box);
 
-        toast.innerText = 'ভিডিও তৈরি হয়েছে — DOWNLOAD VIDEO চাপুন';
-        exportBtn.disabled = false;
-
-        if (audioCtx && audioCtx.state !== 'closed') {
-            audioCtx.close().catch(() => {});
-        }
+        toast.innerText = `ভিডিও তৈরি হয়েছে — ${extension.toUpperCase()} ফাইল`;
+        setTimeout(() => toast.style.display = 'none', 3000);
 
     } catch (err) {
         console.error('Video export error:', err);
-        toast.innerText = 'ভিডিও তৈরি করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।';
-        setTimeout(() => toast.style.display = 'none', 3500);
+        toast.innerText = 'ভিডিও তৈরি করতে সমস্যা হয়েছে: ' + (err.message || 'Unknown error');
+        setTimeout(() => toast.style.display = 'none', 4500);
+
+    } finally {
+        // FULL CLEANUP so the next export can start normally.
+        renderStopped = true;
+        if (rafId) cancelAnimationFrame(rafId);
+        if (progressTimer) clearInterval(progressTimer);
+
+        try {
+            if (recorder && recorder.state !== 'inactive') recorder.stop();
+        } catch (_) {}
+
+        try {
+            if (videoStream) {
+                videoStream.getTracks().forEach(track => {
+                    try { track.stop(); } catch (_) {}
+                });
+            }
+        } catch (_) {}
+
+        try {
+            if (combinedStream) {
+                combinedStream.getTracks().forEach(track => {
+                    try { track.stop(); } catch (_) {}
+                });
+            }
+        } catch (_) {}
+
+        try {
+            if (exportAudioEl) {
+                exportAudioEl.pause();
+                exportAudioEl.removeAttribute('src');
+                exportAudioEl.load();
+                exportAudioEl.remove();
+            }
+        } catch (_) {}
+
+        try {
+            if (audioCtx && audioCtx.state !== 'closed') {
+                await audioCtx.close();
+            }
+        } catch (_) {}
+
+        if (currentMediaType === 'video' && uploadedVideo) {
+            try { uploadedVideo.pause(); } catch (_) {}
+        }
+
         exportBtn.disabled = false;
+        window.__videoExportRunning = false;
     }
 }
 
