@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<link rel="icon" type="image/x-icon" href="favicon.png">
+<title>অনিম</title>
+
+<!-- বাংলা গুগল ফন্টস -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Anek+Bangla:wght@400;600&family=Atma:wght@500;600&family=Galada&family=Hind+Siliguri:wght@400;500;600;700&family=Mina:wght@400;700&family=Noto+Sans+Bengali:wght@400;600&family=Noto+Serif+Bengali:wght@400;600;700&family=Tiro+Bangla:ital@0;1&display=swap" rel="stylesheet">
+
+<style>
+/* --- লোকাল বাংলা ফন্ট লোডার --- */
+@font-face {
+    font-family: 'শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট';
+    src: url('শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট.ttf') format('truetype');
+    font-weight: normal; font-style: normal;
+}
+@font-face {
+    font-family: 'BL Bongolipi';
+    src: url('BL Bongolipi press Unicode regular.ttf') format('truetype');
+    font-weight: normal; font-style: normal;
+}
+@font-face {
+    font-family: 'BenSen';
+    src: url('BenSen Handwriting Unicode.ttf') format('truetype');
+    font-weight: normal; font-style: normal;
+}
+@font-face {
+    font-family: 'BL Abdul';
+    src: url('BL Abdul Bangla Unicode.ttf') format('truetype');
+    font-weight: normal; font-style: normal;
+}
+@font-face {
+    font-family: 'BL Shahid';
+    src: url('BL Shahid Tahmid Tamim Unicode.ttf') format('truetype');
+    font-weight: normal; font-style: normal;
+}
+
+* { 
+    box-sizing: border-box; 
+    margin: 0; 
+    padding: 0;
+    -webkit-tap-highlight-color: transparent; 
+}
+
+body {
+    padding: 20px 10px; 
+    background: #000;
+    font-family: 'শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট', 'Hind Siliguri', sans-serif;
+    display: flex; 
+    flex-direction: column; 
+    align-items: center;
+    overflow-x: hidden; 
+    width: 100%;
+}
+
+.wrapper { 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    width: 100%; 
+    max-width: 360px; 
+    overflow: hidden; 
+}
+
+.card-scaler { 
+    width: 100%;
+    margin-bottom: 15px;
+    display: flex;
+    justify-content: center;
+    overflow: visible;
+}
+
+/* ক্যানভাস কার্ড */
+#mainCardCanvas {
+    width: 360px; 
+    height: 480px; 
+    background: #FFF6DB;
+    display: block;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.9);
+    transform-origin: top center;
+    flex-shrink: 0;
+    user-select: none;
+}
+
+.panel {
+    width: 100%; 
+    background: #0a0a0a; 
+    padding: 16px;
+    border-radius: 16px; 
+    border: 1px solid #1a1a1a; 
+    margin-top: 15px; 
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+}
+
+.label-row { 
+    display: flex; 
+    justify-content: space-between; 
+    align-items: center; 
+    font-size: 11px; 
+    margin-bottom: 8px; 
+    color: #888; 
+    text-transform: uppercase; 
+    letter-spacing: 0.5px; 
+}
+.val-badge { background: #ffffff; color: #000; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+
+.slider-group { display: flex; align-items: center; gap: 8px; margin-bottom: 15px; width: 100%; }
+.mini-btn { background: #161616; color: #fff; border: 1px solid #222; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 18px; flex-shrink: 0; }
+.slider-group input { flex-grow: 1; accent-color: #fff; height: 6px; }
+
+.btn-row { display: flex; gap: 6px; margin-bottom: 15px; width: 100%; }
+.btn-row button { flex: 1; padding: 11px; border-radius: 8px; background: #121212; color: #aaa; border: 1px solid #222; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+.active-btn { background: #ffffff !important; color: #000 !important; border: 1px solid #ffffff !important; }
+
+.pos-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; width: 90px; flex-shrink: 0; }
+.pos-btn { background: #121212; color: #fff; border: 1px solid #222; padding: 6px; border-radius: 6px; font-size: 10px; cursor: pointer; text-align: center; }
+
+.input-field {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 12px;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid #222;
+    background: #121212;
+    color: #fff;
+    font-size: 13px;
+    outline: none;
+    font-family: inherit;
+    display: block;
+}
+textarea.input-field { resize: none; }
+
+.file-up { margin-bottom: 15px; border: 1px dashed #333; padding: 12px; border-radius: 8px; width: 100%; color: #888; font-size: 12px; background: #050505; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+.file-up:hover { border-color: #555; }
+
+.save-btn { width: 100%; padding: 14px; border-radius: 8px; background: #ffffff; border: none; color: #000; font-size: 14px; font-weight: 700; cursor: pointer; letter-spacing: 0.5px; transition: opacity 0.2s; margin-top: 5px; }
+.save-btn:hover { opacity: 0.9; }
+.video-btn { width: 100%; padding: 14px; border-radius: 8px; background: #e60000; border: none; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; letter-spacing: 0.5px; transition: all 0.2s; margin-top: 8px; }
+.video-btn:hover { background: #cc0000; }
+.reset-btn { width: 100%; padding: 10px; border-radius: 8px; background: transparent; border: 1px solid #222; color: #555; font-size: 12px; font-weight: 600; cursor: pointer; margin-top: 8px; }
+
+#toast { display: none; position: fixed; top: 20px; background: #fff; color: #000; padding: 10px 24px; border-radius: 30px; font-size: 12px; z-index: 9999; font-weight: bold; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+</style>
+</head>
+<body>
+
+<div id="toast">প্রসেসিং হচ্ছে...</div>
+
+<div class="wrapper">
+    <div class="card-scaler" id="scaler-container">
+        <!-- ৭২০x৯৬০ আল্ট্রা এইচডি ক্যানভাস -->
+        <canvas id="mainCardCanvas" width="720" height="960"></canvas>
+    </div>
+
+    <div class="panel">
+        <!-- ১. মিডিয়া আপলোড -->
+        <div class="label-row"><span>Upload Photo or Video:</span></div>
+        <div class="file-up" onclick="document.getElementById('imgInput').click()">
+            <span id="img-name-label">গ্যালারি থেকে ফটো বা ভিডিও বেছে নিন</span>
+            <span style="background:#222; padding:2px 8px; border-radius:4px; font-size:10px; color:#fff;">ব্রাউজ</span>
+        </div>
+        <input type="file" id="imgInput" accept="image/*,video/*" style="display:none;">
+
+        <!-- ভিডিও মিউট / আনমিউট ফিচার -->
+        <div id="videoMuteRow" style="display:none; margin-bottom:12px;">
+            <div class="label-row"><span>Original Video Sound:</span></div>
+            <button type="button" id="videoMuteToggleBtn" onclick="toggleVideoMute()" style="width:100%; padding:10px; border-radius:8px; background:#181818; color:#fff; border:1px solid #333; font-size:12px; font-weight:600; cursor:pointer; display:flex; justify-content:space-between; align-items:center;">
+                <span id="muteStatusText">ভিডিওর নিজস্ব সাউন্ড: আনমিউট (চালু) 🔊</span>
+                <span id="muteActionBadge" style="background:#333; padding:2px 8px; border-radius:4px; font-size:10px;">মিউট করুন</span>
+            </button>
+        </div>
+
+        <!-- ২. Media Position & Zoom -->
+        <div class="label-row"><span>Media Position & Zoom:</span></div>
+        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 15px; width: 100%;">
+            <div class="slider-group" style="flex: 1; margin-bottom: 0;">
+                <button class="mini-btn" onclick="adjustZoom(-0.05)">−</button>
+                <input type="range" id="zoomRange" min="1" max="4" step="0.05" value="1">
+                <button class="mini-btn" onclick="adjustZoom(0.05)">+</button>
+            </div>
+            <div class="pos-grid">
+                <span></span><button class="pos-btn" onclick="moveImg('up')">▲</button><span></span>
+                <button class="pos-btn" onclick="moveImg('left')">◀</button>
+                <button class="pos-btn" onclick="moveImg('down')">▼</button>
+                <button class="pos-btn" onclick="moveImg('right')">▶</button>
+            </div>
+        </div>
+
+        <!-- ৩. Image Brightness -->
+        <div class="label-row"><span>Image Brightness:</span> <span class="val-badge" id="brightVal">100%</span></div>
+        <div class="slider-group">
+            <button class="mini-btn" onclick="adjustValue('brightRange', -5)">−</button>
+            <input type="range" id="brightRange" min="20" max="200" step="5" value="100">
+            <button class="mini-btn" onclick="adjustValue('brightRange', 5)">+</button>
+        </div>
+
+        <!-- ৪. কালার ফিল্টার -->
+        <div class="label-row"><span>Color Filter:</span></div>
+        <div class="btn-row">
+            <button onclick="setMode('normal')" id="m-normal">Original</button>
+            <button onclick="setMode('bw')" id="m-bw" class="active-btn">B&W</button>
+            <button onclick="setMode('aesthetic')" id="m-aesthetic">Aesthetic Mood</button>
+        </div>
+
+        <!-- ৫. ভিজ্যুয়াল ইফেক্ট -->
+        <div class="label-row"><span>Visual Effects (সিনেমাটিক ইফেক্ট):</span></div>
+        <select id="effectSelector" onchange="changeEffect(this.value)" class="input-field">
+            <option value="none">None (কোনোটি নয়)</option>
+            <option value="vintage_film" selected>35mm Vintage Film (ফিল্ম ডাস্ট ও স্ক্র্যাচ)</option>
+            <option value="retro_celluloid">16mm Retro Projector (প্রজেক্টর পালস ও হেয়ার)</option>
+            <option value="monochrome_grain">8mm Noir Monochrome (ডার্ক নয়ার ফিল্ম)</option>
+            <option value="sepia_dust">Nostalgic Sepia Dust (নস্টালজিক সেপিয়া অ্যাম্বার)</option>
+        </select>
+
+        <!-- ৬. অডিও আপলোড -->
+        <div class="label-row"><span>Upload Background Audio (অডিও গান):</span></div>
+        <div class="file-up" onclick="document.getElementById('audioInput').click()">
+            <span id="audio-name-label">গ্যালারি থেকে MP3 / অডিও বেছে নিন</span>
+            <span style="background:#222; padding:2px 8px; border-radius:4px; font-size:10px; color:#fff;">অডিও</span>
+        </div>
+        <input type="file" id="audioInput" accept="audio/*" style="display:none;">
+
+        <!-- ৭. ভিডিও থেকে অডিও নেওয়ার অপশন -->
+        <div class="file-up" style="border-color:#532; background:#080503;" onclick="document.getElementById('videoAudioInput').click()">
+            <span id="video-audio-label" style="color:#dca;">ভিডিও থেকে অডিও নিন (গ্যালারির ভিডিও)</span>
+            <span style="background:#421; padding:2px 8px; border-radius:4px; font-size:10px; color:#fa5;">ভিডিও</span>
+        </div>
+        <input type="file" id="videoAudioInput" accept="video/*" style="display:none;">
+
+        <!-- অডিও প্লেয়ার -->
+        <div id="audioPlayerBox" style="display:none; background:#121212; padding:8px 12px; border-radius:8px; margin-bottom:12px; border:1px solid #222;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                <button type="button" id="playAudioBtn" onclick="toggleAudioPlay()" style="background:#fff; color:#000; border:none; padding:4px 10px; border-radius:4px; font-size:10px; font-weight:bold; cursor:pointer;">▶ প্লে</button>
+                <span id="audioStatusText" style="font-size:10px; color:#888;">অডিও রেডি</span>
+            </div>
+            <input type="range" id="audioSeek" min="0" max="100" value="0" style="width:100%; height:4px; accent-color:#fff;" oninput="seekAudio(this.value)">
+        </div>
+
+        <!-- কার্ড হাইট কন্ট্রোল -->
+        <div class="label-row"><span>Card Height Control:</span> <span class="val-badge" id="cardHeightVal">480px</span></div>
+        <div class="slider-group">
+            <button class="mini-btn" onclick="adjustValue('cardHeightRange', -10)">−</button>
+            <input type="range" id="cardHeightRange" min="400" max="700" step="10" value="480">
+            <button class="mini-btn" onclick="adjustValue('cardHeightRange', 10)">+</button>
+        </div>
+
+        <!-- বাংলা ফন্টসমূহ -->
+        <div class="label-row"><span>Select Bengali Font:</span></div>
+        <select id="fontSelector" onchange="changeFont(this.value)" class="input-field">
+            <option value="শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট, 'Hind Siliguri', sans-serif">শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট (Default)</option>
+            <option value="'Kalpurush', 'Hind Siliguri', sans-serif">Kalpurush (কালপুরুষ - ক্লাসিক)</option>
+            <option value="'SolaimanLipi', 'Noto Sans Bengali', sans-serif">SolaimanLipi (সোলায়মানলিপি)</option>
+            <option value="'Hind Siliguri', sans-serif">Hind Siliguri (হিন্দ শিলিগুড়ি)</option>
+            <option value="'Noto Serif Bengali', serif">Noto Serif Bengali (বইয়ের পাতা)</option>
+            <option value="'Galada', cursive">Galada (গালাদা ক্যালিগ্রাফি)</option>
+            <option value="'Tiro Bangla', serif">Tiro Bangla (তিরো বাংলা)</option>
+            <option value="'Anek Bangla', sans-serif">Anek Bangla (অনেক বাংলা)</option>
+            <option value="'Mina', sans-serif">Mina (মিনা)</option>
+            <option value="'Atma', cursive">Atma (আত্মা)</option>
+            <option value="'BL Bongolipi', sans-serif">BL Bongolipi (লোকাল)</option>
+            <option value="'BenSen', cursive">BenSen Handwriting (লোকাল)</option>
+            <option value="'BL Abdul', serif">BL Abdul Bangla (লোকাল)</option>
+            <option value="'BL Shahid', sans-serif">BL Shahid Tahmid (লোকাল)</option>
+        </select>
+
+        <div class="label-row"><span>Text Alignment:</span></div>
+        <div class="btn-row">
+            <button onclick="setAlign('left')" id="a-left" class="active-btn">Left</button>
+            <button onclick="setAlign('center')" id="a-center">Center</button>
+            <button onclick="setAlign('right')" id="a-right">Right</button>
+        </div>
+
+        <div class="label-row"><span>Preset Font Size:</span></div>
+        <div class="btn-row">
+            <button onclick="setPresetFontSize(13.5)" id="fs-small" class="active-btn">Small (13.5)</button>
+            <button onclick="setPresetFontSize(16)" id="fs-medium">Medium (16)</button>
+            <button onclick="setPresetFontSize(18)" id="fs-large">Large (18)</button>
+        </div>
+
+        <div class="label-row"><span>Font Size Control:</span> <span class="val-badge" id="sizeVal">13.5</span></div>
+        <div class="slider-group">
+            <button class="mini-btn" onclick="adjustValue('textSizeRange', -0.5)">−</button>
+            <input type="range" id="textSizeRange" min="10" max="40" step="0.5" value="13.5">
+            <button class="mini-btn" onclick="adjustValue('textSizeRange', 0.5)">+</button>
+        </div>
+
+        <div class="label-row"><span>Video Duration (Seconds):</span></div>
+        <input type="number" id="videoDurationInput" min="1" max="600" value="10" class="input-field" placeholder="ভিডিও দৈর্ঘ্য সেকেন্ডে (উদা: 10)">
+
+        <div class="label-row"><span>Author Name Field:</span></div>
+        <input type="text" id="creditInput" class="input-field" placeholder="লেখকের নাম..." value="অনিম">
+        
+        <div class="label-row"><span>Status Text Field:</span></div>
+        <textarea id="textInput" class="input-field" rows="5" placeholder="আপনার কবিতা বা স্ট্যাটাস লিখুন..."></textarea>
+        
+        <!-- একশন বাটনসমূহ -->
+        <button onclick="downloadOriginalCanvas()" class="save-btn">SAVE ULTRA HD IMAGE</button>
+        <button onclick="exportHDVideo()" id="exportVideoBtn" class="video-btn">🎥 EXPORT HD VIDEO CARD</button>
+        <button onclick="resetDefaults()" class="reset-btn">RESET DEFAULTS</button>
+    </div>
+</div>
+
+<audio id="bgAudioEl" playsinline></audio>
+
+<script>
+let zoom = 1, posX = 0, posY = 0, mode = 'bw', brightness = 100, currentCardHeight = 480;
+let currentAlign = 'left';
+let currentMediaType = 'none'; // 'image' | 'video'
+let currentVisualEffect = 'vintage_film';
+let isVideoSoundMuted = false;
+let selectedFontFamily = "শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট, 'Hind Siliguri', sans-serif"; 
+let bgAudioUrl = null;
+
+let calculatedWidth = 360;
+let calculatedHeight = 200;
+
+let uploadedImage = null;
+let uploadedVideo = null;
+
+const canvas = document.getElementById('mainCardCanvas');
+const ctx = canvas.getContext('2d');
+const bgAudioEl = document.getElementById('bgAudioEl');
+
+let liveDateString = '';
+let liveTimeString = '';
+
+function updateLiveClock() {
+    const now = new Date();
+    const dateOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+    liveDateString = now.toLocaleDateString('en-US', dateOptions);
+    const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+    liveTimeString = "At " + now.toLocaleTimeString('en-US', timeOptions);
+}
+updateLiveClock();
+setInterval(updateLiveClock, 1000);
+
+function handleResponsiveCard() {
+    const container = document.getElementById('scaler-container');
+    const containerWidth = container.offsetWidth;
+    const cardWidth = 360;
+
+    if (containerWidth < cardWidth) {
+        const scale = containerWidth / cardWidth;
+        canvas.style.transform = `scale(${scale})`;
+        container.style.height = (currentCardHeight * scale) + "px";
+    } else {
+        canvas.style.transform = "scale(1)";
+        container.style.height = currentCardHeight + "px";
+    }
+}
+window.addEventListener('resize', handleResponsiveCard);
+
+function changeFont(fontName) {
+    selectedFontFamily = fontName;
+}
+
+function adjustValue(id, delta) {
+    const el = document.getElementById(id);
+    let newVal = parseFloat(el.value) + delta;
+    if(newVal >= parseFloat(el.min) && newVal <= parseFloat(el.max)) {
+        el.value = newVal;
+        el.dispatchEvent(new Event('input'));
+    }
+}
+
+function adjustZoom(delta) {
+    const el = document.getElementById('zoomRange');
+    let newVal = parseFloat(el.value) + delta;
+    if(newVal >= 1 && newVal <= 4) {
+        el.value = newVal;
+        zoom = newVal;
+    }
+}
+
+document.getElementById('zoomRange').oninput = function() { 
+    zoom = parseFloat(this.value); 
+};
+
+function moveImg(dir) {
+    if(dir === 'up') posY -= 8; 
+    if(dir === 'down') posY += 8;
+    if(dir === 'left') posX -= 8; 
+    if(dir === 'right') posX += 8;
+}
+
+function setPresetFontSize(size) {
+    const slider = document.getElementById('textSizeRange');
+    slider.value = size;
+    document.getElementById('sizeVal').innerText = size;
+    
+    document.querySelectorAll('[id^="fs-"]').forEach(b => b.classList.remove('active-btn'));
+    if(size === 13.5) document.getElementById('fs-small').classList.add('active-btn');
+    if(size === 16) document.getElementById('fs-medium').classList.add('active-btn');
+    if(size === 18) document.getElementById('fs-large').classList.add('active-btn');
+}
+
+document.getElementById('cardHeightRange').oninput = function() {
+    currentCardHeight = parseInt(this.value);
+    document.getElementById('cardHeightVal').innerText = currentCardHeight + "px";
+    canvas.style.height = currentCardHeight + "px";
+    canvas.height = currentCardHeight * 2;
+    handleResponsiveCard(); 
+};
+
+document.getElementById('textSizeRange').oninput = function() {
+    document.getElementById('sizeVal').innerText = this.value;
+    document.querySelectorAll('[id^="fs-"]').forEach(b => b.classList.remove('active-btn'));
+    let val = parseFloat(this.value);
+    if(val === 13.5) document.getElementById('fs-small').classList.add('active-btn');
+    if(val === 16) document.getElementById('fs-medium').classList.add('active-btn');
+    if(val === 18) document.getElementById('fs-large').classList.add('active-btn');
+};
+
+document.getElementById('brightRange').oninput = function() {
+    brightness = this.value;
+    document.getElementById('brightVal').innerText = this.value + "%";
+};
+
+function setAlign(al) {
+    currentAlign = al;
+    document.querySelectorAll('[id^="a-"]').forEach(b => b.classList.remove('active-btn'));
+    document.getElementById('a-' + al).classList.add('active-btn');
+}
+
+function setMode(m) {
+    mode = m;
+    document.querySelectorAll('[id^="m-"]').forEach(b => b.classList.remove('active-btn'));
+    document.getElementById('m-' + m).classList.add('active-btn');
+}
+
+function changeEffect(eff) {
+    currentVisualEffect = eff;
+}
+
+function toggleVideoMute() {
+    isVideoSoundMuted = !isVideoSoundMuted;
+    const statusText = document.getElementById('muteStatusText');
+    const badge = document.getElementById('muteActionBadge');
+    if (isVideoSoundMuted) {
+        statusText.innerText = "ভিডিওর নিজস্ব সাউন্ড: মিউট (বন্ধ) 🔇";
+        statusText.style.color = "#ff6b6b";
+        badge.innerText = "আনমিউট করুন";
+    } else {
+        statusText.innerText = "ভিডিওর নিজস্ব সাউন্ড: আনমিউট (চালু) 🔊";
+        statusText.style.color = "#fff";
+        badge.innerText = "মিউট করুন";
+    }
+}
+
+function drawVisualEffect(tCtx, x, y, w, h, scale, effect, now) {
+    if (!effect || effect === 'none') return;
+    tCtx.save();
+    tCtx.beginPath();
+    tCtx.rect(x, y, w, h);
+    tCtx.clip();
+
+    const sec = now / 1000;
+    if (effect === 'vintage_film') {
+        for (let d = 0; d < 18; d++) {
+            const step = Math.floor(sec * 14 + d * 5);
+            const fx = x + (((Math.sin(step * 311) * 0.5 + 0.5) * w) % w);
+            const fy = y + (((Math.cos(step * 577) * 0.5 + 0.5) * h) % h);
+            const fLen = (2.5 + (d % 3) * 2.5) * scale;
+            const fAngle = (Math.sin(step) * Math.PI) / 3;
+            tCtx.strokeStyle = d % 2 === 0 ? 'rgba(255, 255, 255, 0.45)' : 'rgba(30, 30, 30, 0.4)';
+            tCtx.lineWidth = 0.8 * scale;
+            tCtx.beginPath();
+            tCtx.moveTo(fx, fy);
+            tCtx.lineTo(fx + Math.cos(fAngle) * fLen, fy + Math.sin(fAngle) * fLen);
+            tCtx.stroke();
+        }
+        const scratchStep = Math.floor(sec * 4);
+        if (scratchStep % 3 === 0) {
+            const scratchX = x + (((Math.sin(scratchStep * 137) * 0.5 + 0.5) * w) % w);
+            tCtx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+            tCtx.lineWidth = 0.8 * scale;
+            tCtx.beginPath();
+            tCtx.moveTo(scratchX, y);
+            tCtx.lineTo(scratchX + Math.sin(sec * 10) * 1.5 * scale, y + h);
+            tCtx.stroke();
+        }
+        const vig = tCtx.createRadialGradient(x + w/2, y + h/2, w * 0.35, x + w/2, y + h/2, w * 0.72);
+        vig.addColorStop(0, 'rgba(0,0,0,0)');
+        vig.addColorStop(1, 'rgba(0,0,0,0.35)');
+        tCtx.fillStyle = vig;
+        tCtx.fillRect(x, y, w, h);
+    } else if (effect === 'retro_celluloid') {
+        const shutter = Math.sin(sec * 22) * 0.025 + 0.05;
+        tCtx.fillStyle = `rgba(255, 255, 255, ${shutter})`;
+        tCtx.fillRect(x, y, w, h);
+        for (let i = 0; i < 16; i++) {
+            const f = Math.floor(sec * 16 + i * 7);
+            const dx = x + (((Math.sin(f * 433) * 0.5 + 0.5) * w) % w);
+            const dy = y + (((Math.cos(f * 647) * 0.5 + 0.5) * h) % h);
+            tCtx.fillStyle = i % 3 === 0 ? 'rgba(255, 255, 255, 0.5)' : 'rgba(30, 30, 30, 0.4)';
+            tCtx.fillRect(dx, dy, 1.4 * scale, 1.4 * scale);
+        }
+    } else if (effect === 'monochrome_grain') {
+        tCtx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+        tCtx.fillRect(x, y, w, h);
+        const vig = tCtx.createRadialGradient(x + w/2, y + h/2, w * 0.3, x + w/2, y + h/2, w * 0.75);
+        vig.addColorStop(0, 'rgba(0,0,0,0)');
+        vig.addColorStop(1, 'rgba(0,0,0,0.7)');
+        tCtx.fillStyle = vig;
+        tCtx.fillRect(x, y, w, h);
+        for (let i = 0; i < 12; i++) {
+            const px = x + (((Math.sin(now * 0.013 + i * 29) * 0.5 + 0.5) * w) % w);
+            const py = y + (((Math.cos(now * 0.017 + i * 37) * 0.5 + 0.5) * h) % h);
+            tCtx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+            tCtx.fillRect(px, py, 1.5 * scale, 1.5 * scale);
+        }
+    } else if (effect === 'sepia_dust') {
+        tCtx.fillStyle = 'rgba(140, 80, 20, 0.16)';
+        tCtx.fillRect(x, y, w, h);
+        const vig = tCtx.createRadialGradient(x + w/2, y + h/2, w * 0.35, x + w/2, y + h/2, w * 0.75);
+        vig.addColorStop(0, 'rgba(0,0,0,0)');
+        vig.addColorStop(1, 'rgba(25, 10, 2, 0.7)');
+        tCtx.fillStyle = vig;
+        tCtx.fillRect(x, y, w, h);
+        for (let i = 0; i < 12; i++) {
+            const px = x + (((Math.sin(now * 0.011 + i * 23) * 0.5 + 0.5) * w) % w);
+            const py = y + (((Math.cos(now * 0.015 + i * 41) * 0.5 + 0.5) * h) % h);
+            tCtx.fillStyle = 'rgba(255, 235, 180, 0.55)';
+            tCtx.fillRect(px, py, 1.5 * scale, 1.5 * scale);
+        }
+    }
+    tCtx.restore();
+}
+
+function formatSmartBengaliLines(tCtx, text, maxW) {
+    const paragraphs = text.split('\n');
+    const resultLines = [];
+
+    paragraphs.forEach(para => {
+        if (!para.trim()) {
+            resultLines.push('');
+            return;
+        }
+
+        const tokens = para.split(/(\s+)/);
+        let currentLine = '';
+
+        tokens.forEach(token => {
+            if (!token) return;
+            let testLine = currentLine + token;
+            if (tCtx.measureText(testLine).width <= maxW) {
+                currentLine = testLine;
+            } else {
+                if (currentLine.trim()) {
+                    resultLines.push(currentLine.trim());
+                    currentLine = token.trimStart();
+                } else {
+                    let sub = '';
+                    for (let ch of token) {
+                        if (tCtx.measureText(sub + ch).width > maxW && sub) {
+                            resultLines.push(sub.trim());
+                            sub = ch;
+                        } else {
+                            sub += ch;
+                        }
+                    }
+                    currentLine = sub;
+                }
+            }
+        });
+
+        if (currentLine.trim()) {
+            resultLines.push(currentLine.trim());
+        }
+    });
+
+    return resultLines;
+}
+
+function renderCardContent(tCtx, scale, now) {
+    const cW = 360 * scale;
+    const cH = currentCardHeight * scale;
+
+    tCtx.fillStyle = '#FFF6DB';
+    tCtx.fillRect(0, 0, cW, cH);
+
+    const boxW = 360 * scale;
+    const boxH = 200 * scale;
+
+    tCtx.save();
+    tCtx.beginPath();
+    tCtx.rect(0, 0, boxW, boxH);
+    tCtx.clip();
+
+    tCtx.fillStyle = '#1a1a1a';
+    tCtx.fillRect(0, 0, boxW, boxH);
+
+    let media = null;
+    let mW = 0, mH = 0;
+    if (currentMediaType === 'video' && uploadedVideo && uploadedVideo.readyState >= 2) {
+        media = uploadedVideo;
+        mW = uploadedVideo.videoWidth;
+        mH = uploadedVideo.videoHeight;
+    } else if (currentMediaType === 'image' && uploadedImage && uploadedImage.complete && uploadedImage.naturalWidth > 0) {
+        media = uploadedImage;
+        mW = uploadedImage.naturalWidth;
+        mH = uploadedImage.naturalHeight;
+    }
+
+    if (media && mW > 0 && mH > 0) {
+        const baseW = calculatedWidth * scale;
+        const baseH = calculatedHeight * scale;
+        const finalW = baseW * zoom;
+        const finalH = baseH * zoom;
+
+        const centerX = (boxW / 2) + (posX * scale);
+        const centerY = (boxH / 2) + (posY * scale);
+        const drawX = centerX - (finalW / 2);
+        const drawY = centerY - (finalH / 2);
+
+        let filterStr = `brightness(${brightness}%)`;
+        if (mode === 'bw') filterStr = `grayscale(100%) contrast(110%) ${filterStr}`;
+        if (mode === 'aesthetic') filterStr = `grayscale(25%) sepia(40%) contrast(115%) saturate(70%) ${filterStr}`;
+
+        tCtx.filter = filterStr;
+        tCtx.drawImage(media, drawX, drawY, finalW, finalH);
+        tCtx.filter = 'none';
+    }
+
+    drawVisualEffect(tCtx, 0, 0, boxW, boxH, scale, currentVisualEffect, now);
+    tCtx.restore();
+
+    tCtx.save();
+    const padX = 24 * scale;
+    const authorY = (200 + 16) * scale;
+
+    const authorVal = document.getElementById('creditInput').value || 'অনিম';
+    tCtx.fillStyle = '#000000';
+    tCtx.font = `normal ${21 * scale}px ${selectedFontFamily}`;
+    tCtx.textBaseline = 'top';
+    tCtx.textAlign = 'left';
+    tCtx.fillText(authorVal, padX, authorY);
+
+    const dateY = authorY + (21 * 1.2 + 6) * scale;
+    tCtx.fillStyle = '#77746f';
+    tCtx.font = `normal ${11 * scale}px 'Times New Roman', serif`;
+    tCtx.textBaseline = 'top';
+    tCtx.fillText(liveDateString, padX, dateY);
+    tCtx.fillText(liveTimeString, padX, dateY + (11 * 1.3 * scale));
+
+    const dividerY = dateY + 2 * (11 * 1.3 * scale) + (8 * scale);
+    tCtx.fillStyle = 'rgba(0, 0, 0, 0.08)';
+    tCtx.fillRect(0, dividerY, cW, 1 * scale);
+
+    const bodyTop = dividerY + (18 * scale);
+    const bodyBottom = cH - (25 * scale);
+    const maxTextW = cW - (padX * 2);
+
+    const poemRaw = document.getElementById('textInput').value || '';
+    if (poemRaw.trim()) {
+        let activeSize = parseFloat(document.getElementById('textSizeRange').value) * scale;
+        tCtx.fillStyle = '#000000';
+        tCtx.font = `normal ${activeSize}px ${selectedFontFamily}`;
+        tCtx.textBaseline = 'top';
+
+        let lines = formatSmartBengaliLines(tCtx, poemRaw, maxTextW);
+        let lineH = activeSize * 1.6;
+
+        while ((lines.length * lineH) > (bodyBottom - bodyTop) && activeSize > 9 * scale) {
+            activeSize -= 0.5 * scale;
+            lineH = activeSize * 1.6;
+            tCtx.font = `normal ${activeSize}px ${selectedFontFamily}`;
+            lines = formatSmartBengaliLines(tCtx, poemRaw, maxTextW);
+        }
+
+        lines.forEach((line, idx) => {
+            let lx = padX;
+            if (currentAlign === 'center') {
+                tCtx.textAlign = 'center';
+                lx = cW / 2;
+            } else if (currentAlign === 'right') {
+                tCtx.textAlign = 'right';
+                lx = cW - padX;
+            } else {
+                tCtx.textAlign = 'left';
+                lx = padX;
+            }
+            tCtx.fillText(line, lx, bodyTop + idx * lineH);
+        });
+    }
+
+    tCtx.restore();
+}
+
+function mainRenderLoop(now) {
+    renderCardContent(ctx, 2, now);
+    requestAnimationFrame(mainRenderLoop);
+}
+requestAnimationFrame(mainRenderLoop);
+
+document.getElementById('imgInput').onchange = e => {
+    const file = e.target.files[0];
+    if(!file) return;
+    document.getElementById('img-name-label').innerText = file.name;
+
+    const fileUrl = URL.createObjectURL(file);
+    posX = 0; posY = 0; zoom = 1; brightness = 100;
+    document.getElementById('zoomRange').value = 1;
+    document.getElementById('brightRange').value = 100;
+    document.getElementById('brightVal').innerText = "100%";
+
+    if (file.type.startsWith('video/')) {
+        currentMediaType = 'video';
+        document.getElementById('videoMuteRow').style.display = 'block';
+        uploadedVideo = document.createElement('video');
+        uploadedVideo.src = fileUrl;
+        uploadedVideo.loop = true;
+        uploadedVideo.muted = true;
+        uploadedVideo.playsInline = true;
+        uploadedVideo.currentTime = 0.1; // প্রথম ফ্রেমের ব্ল্যাংক স্ক্রিন এড়াতে সামান্য এগিয়ে দেওয়া হলো
+        uploadedVideo.play().catch(()=>{});
+        uploadedVideo.onloadedmetadata = function() {
+            let imgRatio = uploadedVideo.videoWidth / uploadedVideo.videoHeight;
+            let boxRatio = 360 / 200;
+            if (imgRatio > boxRatio) {
+                calculatedWidth = 360; 
+                calculatedHeight = 360 / imgRatio;
+            } else {
+                calculatedHeight = 200; 
+                calculatedWidth = 200 * imgRatio;
+            }
+            if (uploadedVideo.duration) {
+                document.getElementById('videoDurationInput').value = Math.min(600, Math.ceil(uploadedVideo.duration));
+            }
+            setMode('bw');
+        };
+    } else {
+        currentMediaType = 'image';
+        document.getElementById('videoMuteRow').style.display = 'none';
+        uploadedImage = new Image();
+        uploadedImage.src = fileUrl;
+        uploadedImage.onload = function() {
+            let imgRatio = uploadedImage.naturalWidth / uploadedImage.naturalHeight;
+            let boxRatio = 360 / 200;
+            if (imgRatio > boxRatio) {
+                calculatedWidth = 360; 
+                calculatedHeight = 360 / imgRatio;
+            } else {
+                calculatedHeight = 200; 
+                calculatedWidth = 200 * imgRatio;
+            }
+            setMode('bw');
+        };
+    }
+};
+
+document.getElementById('audioInput').onchange = e => {
+    if (e.target.files[0]) setupAudio(e.target.files[0], e.target.files[0].name);
+};
+document.getElementById('videoAudioInput').onchange = e => {
+    if (e.target.files[0]) setupAudio(e.target.files[0], `${e.target.files[0].name} (ভিডিও সাউন্ড)`);
+};
+
+function setupAudio(file, displayName) {
+    bgAudioUrl = URL.createObjectURL(file);
+    bgAudioEl.src = bgAudioUrl;
+    bgAudioEl.load();
+
+    document.getElementById('audio-name-label').innerText = displayName;
+    document.getElementById('audioPlayerBox').style.display = 'block';
+    document.getElementById('audioStatusText').innerText = displayName;
+
+    bgAudioEl.onloadedmetadata = () => {
+        if (bgAudioEl.duration) {
+            document.getElementById('videoDurationInput').value = Math.min(600, Math.ceil(bgAudioEl.duration));
+        }
+    };
+    bgAudioEl.ontimeupdate = () => {
+        if (bgAudioEl.duration) {
+            document.getElementById('audioSeek').value = (bgAudioEl.currentTime / bgAudioEl.duration) * 100;
+        }
+    };
+}
+
+function toggleAudioPlay() {
+    const btn = document.getElementById('playAudioBtn');
+    if (bgAudioEl.paused) {
+        bgAudioEl.play();
+        btn.innerText = '⏸ থামান';
+    } else {
+        bgAudioEl.pause();
+        btn.innerText = '▶ প্লে';
+    }
+}
+function seekAudio(percent) {
+    if (bgAudioEl.duration) bgAudioEl.currentTime = (percent / 100) * bgAudioEl.duration;
+}
+
+function downloadOriginalCanvas() {
+    const toast = document.getElementById('toast');
+    toast.innerText = 'ইমেজ প্রস্তুত হচ্ছে...';
+    toast.style.display = 'block';
+
+    const saveCanvas = document.createElement('canvas');
+    saveCanvas.width = 1080;
+    saveCanvas.height = currentCardHeight * 3;
+    const sCtx = saveCanvas.getContext('2d');
+
+    renderCardContent(sCtx, 3, performance.now());
+
+    saveCanvas.toBlob((blob) => {
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `Poetry_Card_${Date.now()}.png`;
+        link.click();
+        toast.style.display = 'none';
+    }, 'image/png');
+}
+
+// সম্পূর্ণ নিখুঁত ভিডিও এক্সপোর্ট ফাংশন (০ সেকেন্ডে খালি স্ক্রিন বা টেক্সট মিস হওয়ার সমস্যা সমাধান করা হয়েছে)
+async function exportHDVideo() {
+    const toast = document.getElementById('toast');
+    const exportBtn = document.getElementById('exportVideoBtn');
+    toast.innerText = 'ভিডিও তৈরি হচ্ছে... ০%';
+    toast.style.display = 'block';
+    exportBtn.disabled = true;
+    let audioCtx = null, tempAudio = null, mediaRecorder = null, progressTimer = null, stopTimer = null;
+
+    try {
+        let durationSec;
+        if (currentMediaType === 'video' && uploadedVideo && Number.isFinite(uploadedVideo.duration) && uploadedVideo.duration > 0) {
+            durationSec = uploadedVideo.duration;
+        } else {
+            durationSec = Math.max(1, parseInt(document.getElementById('videoDurationInput').value) || 10);
+        }
+        const scale = 2;
+        const recCanvas = document.createElement('canvas');
+        recCanvas.width = 360 * scale;
+        recCanvas.height = currentCardHeight * scale;
+        const rCtx = recCanvas.getContext('2d', { alpha: false, desynchronized: false });
+
+        // Prepare the actual first video frame before starting MediaRecorder.
+        if (currentMediaType === 'video' && uploadedVideo) {
+            uploadedVideo.pause();
+            await new Promise(resolve => {
+                let done = false;
+                const finish = () => { if (done) return; done = true; uploadedVideo.removeEventListener('seeked', finish); resolve(); };
+                uploadedVideo.addEventListener('seeked', finish, { once: true });
+                try { uploadedVideo.currentTime = Math.min(0.1, Math.max(0, (uploadedVideo.duration || 1) - 0.01)); } catch(e) { finish(); }
+                setTimeout(finish, 1000);
+            });
+            if (uploadedVideo.readyState < 2) {
+                await new Promise(resolve => {
+                    const check = () => { if (uploadedVideo.readyState >= 2) { uploadedVideo.removeEventListener('loadeddata', check); resolve(); } };
+                    uploadedVideo.addEventListener('loadeddata', check);
+                    setTimeout(() => { uploadedVideo.removeEventListener('loadeddata', check); resolve(); }, 1500);
+                });
+            }
+        }
+
+        if (bgAudioUrl) { try { bgAudioEl.pause(); bgAudioEl.currentTime = 0; } catch(e) {} }
+
+        // Draw several frames BEFORE capture/recording so 0.00s is never blank.
+        renderCardContent(rCtx, scale, performance.now());
+        await new Promise(requestAnimationFrame);
+        renderCardContent(rCtx, scale, performance.now());
+
+        const stream = recCanvas.captureStream(30);
+        const combinedStream = new MediaStream();
+        stream.getVideoTracks().forEach(t => combinedStream.addTrack(t));
+
+        try {
+            const AudioClass = window.AudioContext || window.webkitAudioContext;
+            if (AudioClass) {
+                audioCtx = new AudioClass();
+                const dest = audioCtx.createMediaStreamDestination();
+                let hasAudio = false;
+                if (bgAudioUrl) {
+                    tempAudio = document.createElement('audio');
+                    tempAudio.src = bgAudioUrl;
+                    tempAudio.preload = 'auto';
+                    const aSrc = audioCtx.createMediaElementSource(tempAudio);
+                    aSrc.connect(dest);
+                    hasAudio = true;
+                }
+                if (currentMediaType === 'video' && uploadedVideo && uploadedVideo.src && !isVideoSoundMuted) {
+                    const vStream = uploadedVideo.captureStream ? uploadedVideo.captureStream() : (uploadedVideo.mozCaptureStream ? uploadedVideo.mozCaptureStream() : null);
+                    if (vStream && vStream.getAudioTracks().length) {
+                        audioCtx.createMediaStreamSource(vStream).connect(dest);
+                        hasAudio = true;
+                    }
+                }
+                if (hasAudio) dest.stream.getAudioTracks().forEach(t => combinedStream.addTrack(t));
+            }
+        } catch(e) { console.warn('Audio mixing:', e); }
+
+        let mimeType = 'video/webm';
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) mimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
+        else if (MediaRecorder.isTypeSupported('video/mp4')) mimeType = 'video/mp4';
+        else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) mimeType = 'video/webm;codecs=vp9,opus';
+        else if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) mimeType = 'video/webm;codecs=vp8,opus';
+
+        mediaRecorder = new MediaRecorder(combinedStream, { mimeType, videoBitsPerSecond: 8000000, audioBitsPerSecond: 192000 });
+        const chunks = [];
+        mediaRecorder.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+        let isRecording = true;
+        const startTime = performance.now();
+
+        function recordLoop(now) {
+            if (!isRecording) return;
+            renderCardContent(rCtx, scale, now);
+            requestAnimationFrame(recordLoop);
+        }
+
+        mediaRecorder.onstop = () => {
+            isRecording = false;
+            if (progressTimer) clearInterval(progressTimer);
+            if (stopTimer) clearTimeout(stopTimer);
+            const blob = new Blob(chunks, { type: mediaRecorder.mimeType || mimeType });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Poetry_Video_${Date.now()}.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+            if (tempAudio) { try { tempAudio.pause(); tempAudio.src = ''; } catch(e) {} }
+            if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
+            if (currentMediaType === 'video' && uploadedVideo) { uploadedVideo.pause(); try { uploadedVideo.currentTime = 0.1; } catch(e) {} }
+            toast.innerText = 'ভিডিও সফলভাবে এক্সপোর্ট হয়েছে!';
+            setTimeout(() => toast.style.display = 'none', 3000);
+            exportBtn.disabled = false;
+        };
+
+        // Last full render immediately before recorder.start().
+        renderCardContent(rCtx, scale, performance.now());
+        mediaRecorder.start(100);
+
+        if (currentMediaType === 'video' && uploadedVideo) {
+            // Playback starts from the true beginning; the first frame was already rendered above.
+            try { uploadedVideo.currentTime = 0; } catch(e) {}
+            uploadedVideo.play().catch(() => {});
+        }
+        if (tempAudio) { tempAudio.currentTime = 0; tempAudio.play().catch(() => {}); }
+        requestAnimationFrame(recordLoop);
+
+        progressTimer = setInterval(() => {
+            const elapsed = (performance.now() - startTime) / 1000;
+            toast.innerText = `ভিডিও তৈরি হচ্ছে... ${Math.min(99, Math.floor((elapsed / durationSec) * 100))}%`;
+        }, 100);
+
+        stopTimer = setTimeout(() => {
+            isRecording = false;
+            if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+        }, durationSec * 1000);
+
+    } catch (err) {
+        console.error('Video export error:', err);
+        if (progressTimer) clearInterval(progressTimer);
+        if (stopTimer) clearTimeout(stopTimer);
+        if (tempAudio) { try { tempAudio.pause(); tempAudio.src = ''; } catch(e) {} }
+        if (audioCtx && audioCtx.state !== 'closed') audioCtx.close().catch(() => {});
+        toast.innerText = 'ভিডিও রেন্ডার করতে সমস্যা হয়েছে';
+        setTimeout(() => toast.style.display = 'none', 3000);
+        exportBtn.disabled = false;
+    }
+}
+
+function resetDefaults() {
+    zoom = 1; posX = 0; posY = 0; brightness = 100; currentCardHeight = 480;
+    document.getElementById('zoomRange').value = 1;
+    document.getElementById('brightRange').value = 100;
+    document.getElementById('brightVal').innerText = "100%";
+    document.getElementById('imgInput').value = "";
+    uploadedImage = null;
+    uploadedVideo = null;
+    currentMediaType = 'none';
+    currentVisualEffect = 'vintage_film';
+    isVideoSoundMuted = false;
+    document.getElementById('videoMuteRow').style.display = 'none';
+    document.getElementById('effectSelector').value = 'vintage_film';
+    
+    document.getElementById('cardHeightRange').value = 480;
+    document.getElementById('cardHeightVal').innerText = "480px";
+    canvas.style.height = "480px";
+    canvas.height = 960;
+    
+    document.getElementById('creditInput').value = "অনিম";
+    document.getElementById('textInput').value = "";
+
+    document.getElementById('textSizeRange').value = 13.5;
+    document.getElementById('sizeVal').innerText = "13.5";
+
+    document.getElementById('fontSelector').selectedIndex = 0;
+    selectedFontFamily = "শুভ_লেটারপ্রেস_প্রিমিয়াম_ফন্ট, 'Hind Siliguri', sans-serif";
+
+    setMode('bw');
+    setAlign('left');   
+    setPresetFontSize(13.5); 
+    handleResponsiveCard();
+}
+
+window.onload = () => { 
+    handleResponsiveCard(); 
+};
+</script>
+
+</body>
+</html>
