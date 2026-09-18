@@ -823,7 +823,11 @@ function downloadOriginalCanvas() {
 async function exportHDVideo() {
     const toast = document.getElementById('toast');
     const exportBtn = document.getElementById('exportVideoBtn');
-    toast.innerText = 'ভিডিও তৈরি হচ্ছে... ০%';
+    const durationSec = Math.max(1, Math.min(300,
+        parseInt(document.getElementById('videoDurationInput').value) || 10
+    ));
+
+    toast.innerText = 'YouTube MP4 তৈরি হচ্ছে... 0%';
     toast.style.display = 'block';
     exportBtn.disabled = true;
 
@@ -831,70 +835,55 @@ async function exportHDVideo() {
     let tempAudio = null;
     let mediaRecorder = null;
     let progressTimer = null;
-    let stopTimer = null;
     let frameTimer = null;
+    let generator = null;
+    let generatorWriter = null;
+    let stopped = false;
     let audioSources = [];
-    let recordingStopped = false;
 
     try {
-        const durationSec = Math.max(
-            1,
-            Math.min(300, parseInt(document.getElementById('videoDurationInput').value) || 10)
-        );
+        const FPS = 30;
+        const FRAME_MS = 1000 / FPS;
+        const FRAME_US = Math.round(1000000 / FPS);
+        const scale = 2;
 
         // IMPORTANT:
-        // Keep the existing card ratio/dimensions. We only render at 2x resolution
-        // for cleaner text and use a fixed 30 FPS capture pipeline.
-        const FPS = 30;
-        const scale = 2;
+        // Export canvas is EXACTLY the same 360 x currentCardHeight ratio.
+        // Scale=2 only increases quality; it does NOT change the ratio.
         const recCanvas = document.createElement('canvas');
         recCanvas.width = 360 * scale;
         recCanvas.height = currentCardHeight * scale;
-
         const rCtx = recCanvas.getContext('2d', {
             alpha: false,
             desynchronized: false
         });
-        if (!rCtx) throw new Error('Canvas context পাওয়া যায়নি');
+        if (!rCtx) throw new Error('Canvas context পাওয়া যায়নি।');
 
-        // Prepare the first actual video frame before recording.
+        // Make sure fonts are ready before recording.
+        if (document.fonts && document.fonts.ready) {
+            try { await document.fonts.ready; } catch (e) {}
+        }
+
+        // Prepare uploaded video from the beginning.
         if (currentMediaType === 'video' && uploadedVideo) {
             uploadedVideo.pause();
+            try { uploadedVideo.currentTime = 0; } catch (e) {}
 
             if (uploadedVideo.readyState < 2) {
                 await new Promise(resolve => {
-                    let finished = false;
+                    let done = false;
                     const finish = () => {
-                        if (finished) return;
-                        finished = true;
+                        if (done) return;
+                        done = true;
                         uploadedVideo.removeEventListener('loadeddata', finish);
                         uploadedVideo.removeEventListener('canplay', finish);
                         resolve();
                     };
                     uploadedVideo.addEventListener('loadeddata', finish, { once: true });
                     uploadedVideo.addEventListener('canplay', finish, { once: true });
-                    setTimeout(finish, 2000);
+                    setTimeout(finish, 4000);
                 });
             }
-
-            try {
-                uploadedVideo.currentTime = Math.min(
-                    0.05,
-                    Math.max(0, (uploadedVideo.duration || 0.1) - 0.01)
-                );
-            } catch (e) {}
-
-            await new Promise(resolve => {
-                let finished = false;
-                const finish = () => {
-                    if (finished) return;
-                    finished = true;
-                    uploadedVideo.removeEventListener('seeked', finish);
-                    resolve();
-                };
-                uploadedVideo.addEventListener('seeked', finish, { once: true });
-                setTimeout(finish, 700);
-            });
         }
 
         if (bgAudioUrl) {
@@ -904,33 +893,15 @@ async function exportHDVideo() {
             } catch (e) {}
         }
 
-        // Draw the first frame before creating the capture stream.
+        // Draw a complete first frame BEFORE MediaRecorder starts.
         renderCardContent(rCtx, scale, performance.now());
 
         // ------------------------------------------------------------
-        // FIXED 30 FPS CAPTURE
-        // captureStream(0) disables automatic capture. We explicitly call
-        // requestFrame() once per 1/30 second so the render timing is controlled.
+        // AUDIO MIX
+        // Background audio + original uploaded-video audio.
         // ------------------------------------------------------------
-        const stream = recCanvas.captureStream(0);
-        const videoTrack = stream.getVideoTracks()[0];
-        if (!videoTrack) throw new Error('Video track তৈরি হয়নি');
-
-        // Some browsers expose frameRate constraints. Ask for 30 FPS as well.
-        try {
-            if (videoTrack.applyConstraints) {
-                await videoTrack.applyConstraints({ frameRate: { exact: FPS } }).catch(() => {});
-            }
-        } catch (e) {}
-
         const combinedStream = new MediaStream();
-        combinedStream.addTrack(videoTrack);
 
-        // ------------------------------------------------------------
-        // AUDIO MIXING
-        // Background music + uploaded video's original audio are mixed into
-        // one audio track. This keeps the existing audio behavior intact.
-        // ------------------------------------------------------------
         try {
             const AudioClass = window.AudioContext || window.webkitAudioContext;
             if (AudioClass) {
@@ -943,7 +914,7 @@ async function exportHDVideo() {
                     tempAudio.src = bgAudioUrl;
                     tempAudio.preload = 'auto';
                     tempAudio.loop = true;
-                    tempAudio.crossOrigin = 'anonymous';
+                    tempAudio.playsInline = true;
 
                     const aSrc = audioCtx.createMediaElementSource(tempAudio);
                     aSrc.connect(dest);
@@ -951,12 +922,8 @@ async function exportHDVideo() {
                     hasAudio = true;
                 }
 
-                if (
-                    currentMediaType === 'video' &&
-                    uploadedVideo &&
-                    uploadedVideo.src &&
-                    !isVideoSoundMuted
-                ) {
+                if (currentMediaType === 'video' && uploadedVideo &&
+                    uploadedVideo.src && !isVideoSoundMuted) {
                     const vStream = uploadedVideo.captureStream
                         ? uploadedVideo.captureStream()
                         : (uploadedVideo.mozCaptureStream
@@ -972,45 +939,78 @@ async function exportHDVideo() {
                 }
 
                 if (hasAudio) {
-                    dest.stream.getAudioTracks().forEach(track => {
-                        combinedStream.addTrack(track);
-                    });
+                    dest.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
                 }
             }
         } catch (e) {
-            console.warn('Audio mixing:', e);
+            console.warn('Audio mixing failed:', e);
         }
 
         // ------------------------------------------------------------
-        // MP4 / H.264 / AAC MIME SELECTION
-        // Prefer H.264 High Profile, then Main Profile. Browser support is
-        // checked before creating MediaRecorder.
+        // VIDEO TRACK
+        // First choice = MediaStreamTrackGenerator + exact 30 FPS timestamps.
+        // This is much better for CFR than relying only on canvas capture timing.
+        // Fallback = canvas.captureStream(30) for older Chrome builds.
+        // ------------------------------------------------------------
+        let useGenerator = false;
+        let videoTrack = null;
+
+        if ('MediaStreamTrackGenerator' in window && 'VideoFrame' in window) {
+            try {
+                generator = new MediaStreamTrackGenerator({ kind: 'video' });
+                generatorWriter = generator.writable.getWriter();
+                videoTrack = generator;
+                useGenerator = true;
+            } catch (e) {
+                console.warn('TrackGenerator unavailable, using canvas capture.', e);
+                generator = null;
+                generatorWriter = null;
+            }
+        }
+
+        let canvasStream = null;
+        if (!useGenerator) {
+            canvasStream = recCanvas.captureStream(FPS);
+            videoTrack = canvasStream.getVideoTracks()[0];
+            if (!videoTrack) throw new Error('Video track তৈরি হয়নি।');
+
+            try {
+                if (videoTrack.applyConstraints) {
+                    await videoTrack.applyConstraints({ frameRate: { exact: FPS } });
+                }
+            } catch (e) {
+                console.warn('30 FPS constraint not available:', e);
+            }
+        }
+
+        combinedStream.addTrack(videoTrack);
+
+        // ------------------------------------------------------------
+        // SELECT H.264 MP4 FIRST.
+        // High profile first, Main profile second, then generic MP4.
+        // WebM is only a fallback if this Chrome cannot record MP4.
         // ------------------------------------------------------------
         const mimeCandidates = [
-            'video/mp4;codecs="avc1.64001F,mp4a.40.2"', // H.264 High, Level 3.1 + AAC
-            'video/mp4;codecs="avc1.4D001F,mp4a.40.2"', // H.264 Main, Level 3.1 + AAC
-            'video/mp4;codecs="avc1.64001F"',             // H.264 High, video only
-            'video/mp4;codecs="avc1.4D001F"',             // H.264 Main, video only
+            'video/mp4;codecs="avc1.64001F,mp4a.40.2"', // H.264 High + AAC
+            'video/mp4;codecs="avc1.4D001F,mp4a.40.2"', // H.264 Main + AAC
+            'video/mp4;codecs="avc1.64001F"',
+            'video/mp4;codecs="avc1.4D001F"',
             'video/mp4',
             'video/webm;codecs="vp9,opus"',
-            'video/webm;codecs="vp8,opus"'
+            'video/webm;codecs="vp8,opus"',
+            'video/webm'
         ];
 
-        let mimeType = '';
-        for (const candidate of mimeCandidates) {
-            try {
-                if (MediaRecorder.isTypeSupported(candidate)) {
-                    mimeType = candidate;
-                    break;
-                }
-            } catch (e) {}
-        }
+        const mimeType = mimeCandidates.find(type => {
+            try { return MediaRecorder.isTypeSupported(type); }
+            catch (e) { return false; }
+        });
 
         if (!mimeType) {
-            throw new Error('এই ব্রাউজারে compatible video recorder পাওয়া যায়নি');
+            throw new Error('এই Chrome-এ MP4/WebM video recording support পাওয়া যায়নি।');
         }
 
-        console.log('Selected export MIME:', mimeType);
+        const isMP4 = mimeType.startsWith('video/mp4');
 
         mediaRecorder = new MediaRecorder(combinedStream, {
             mimeType,
@@ -1023,141 +1023,159 @@ async function exportHDVideo() {
             if (e.data && e.data.size > 0) chunks.push(e.data);
         };
 
-        const startedAt = performance.now();
-        let nextFrameAt = startedAt;
-        let isRecording = false;
-
-        // Render + request exactly one canvas frame for each 30 FPS tick.
-        function requestNextFrame() {
-            if (!isRecording || recordingStopped) return;
-
-            const now = performance.now();
-            renderCardContent(rCtx, scale, now);
-
-            try {
-                if (typeof videoTrack.requestFrame === 'function') {
-                    videoTrack.requestFrame();
-                }
-            } catch (e) {
-                console.warn('requestFrame failed:', e);
-            }
-
-            nextFrameAt += 1000 / FPS;
-            const delay = Math.max(0, nextFrameAt - performance.now());
-            frameTimer = setTimeout(requestNextFrame, delay);
-        }
-
         const cleanup = () => {
-            if (progressTimer) clearInterval(progressTimer);
-            if (stopTimer) clearTimeout(stopTimer);
             if (frameTimer) clearTimeout(frameTimer);
-
+            if (progressTimer) clearInterval(progressTimer);
+            try { generatorWriter?.releaseLock(); } catch (e) {}
             try { combinedStream.getTracks().forEach(t => t.stop()); } catch (e) {}
-            try { stream.getTracks().forEach(t => t.stop()); } catch (e) {}
-
-            if (tempAudio) {
-                try {
-                    tempAudio.pause();
-                    tempAudio.src = '';
-                } catch (e) {}
-            }
-
-            if (audioCtx && audioCtx.state !== 'closed') {
-                audioCtx.close().catch(() => {});
-            }
-
-            audioSources = [];
+            try { canvasStream?.getTracks().forEach(t => t.stop()); } catch (e) {}
+            try { tempAudio?.pause(); } catch (e) {}
+            try { audioSources.forEach(s => s.disconnect?.()); } catch (e) {}
+            try { audioCtx?.close(); } catch (e) {}
         };
 
-        mediaRecorder.onstop = () => {
-            recordingStopped = true;
-            isRecording = false;
+        const finishDownload = () => {
+            if (stopped) return;
+            stopped = true;
             cleanup();
 
             if (!chunks.length) {
-                toast.innerText = 'ভিডিও ডেটা পাওয়া যায়নি';
-                setTimeout(() => toast.style.display = 'none', 3000);
-                exportBtn.disabled = false;
-                return;
+                throw new Error('ভিডিও ডেটা পাওয়া যায়নি।');
             }
 
-            const actualMime = mediaRecorder.mimeType || mimeType;
-            const isMp4 = actualMime.toLowerCase().includes('video/mp4');
-            const ext = isMp4 ? 'mp4' : 'webm';
-            const blob = new Blob(chunks, { type: actualMime });
-
-            // Keep the generated file playable before downloading.
+            const blob = new Blob(chunks, { type: mimeType });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `Poetry_Video_${Date.now()}.${ext}`;
+            a.download = `Onim_YouTube_${Date.now()}.${isMP4 ? 'mp4' : 'webm'}`;
+            a.style.display = 'none';
             document.body.appendChild(a);
             a.click();
             a.remove();
 
-            setTimeout(() => URL.revokeObjectURL(url), 10000);
+            // Keep the URL alive long enough for Chrome's download manager.
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
 
             if (currentMediaType === 'video' && uploadedVideo) {
                 uploadedVideo.pause();
-                try { uploadedVideo.currentTime = 0.05; } catch (e) {}
+                try { uploadedVideo.currentTime = 0; } catch (e) {}
             }
 
-            toast.innerText = isMp4
-                ? 'ভিডিও সফলভাবে এক্সপোর্ট হয়েছে! MP4 • H.264 • 30 FPS'
-                : 'MP4 এই ব্রাউজারে সাপোর্ট নেই — WebM এক্সপোর্ট হয়েছে';
-
-            setTimeout(() => toast.style.display = 'none', 3500);
+            toast.innerText = isMP4
+                ? `সফল! H.264 MP4 • High/Main • 30 FPS • 720×${currentCardHeight}`
+                : `MP4 support নেই, WebM export হয়েছে • 30 FPS • 720×${currentCardHeight}`;
+            setTimeout(() => toast.style.display = 'none', 4500);
             exportBtn.disabled = false;
         };
 
+        mediaRecorder.onstop = finishDownload;
+
         mediaRecorder.onerror = e => {
             console.error('MediaRecorder error:', e);
+            if (stopped) return;
+            stopped = true;
+            cleanup();
+            toast.innerText = 'ভিডিও export করতে সমস্যা হয়েছে। Chrome reload করে আবার চেষ্টা করুন।';
+            setTimeout(() => toast.style.display = 'none', 5000);
+            exportBtn.disabled = false;
         };
 
-        // One complete render immediately before recording starts.
-        renderCardContent(rCtx, scale, performance.now());
-
+        // Start recording BEFORE feeding frames.
         mediaRecorder.start();
-        isRecording = true;
-        recordingStopped = false;
-        nextFrameAt = performance.now();
 
-        // Start the first captured frame immediately after recorder.start().
-        requestNextFrame();
+        if (audioCtx && audioCtx.state === 'suspended') {
+            await audioCtx.resume().catch(() => {});
+        }
 
         if (currentMediaType === 'video' && uploadedVideo) {
-            try { uploadedVideo.currentTime = 0.05; } catch (e) {}
-            try { await uploadedVideo.play(); } catch (e) {}
+            try { uploadedVideo.currentTime = 0; } catch (e) {}
+            await uploadedVideo.play().catch(() => {});
         }
 
         if (tempAudio) {
             tempAudio.currentTime = 0;
-            try { await tempAudio.play(); } catch (e) {}
+            await tempAudio.play().catch(() => {});
         }
 
-        progressTimer = setInterval(() => {
-            if (recordingStopped) return;
-            const elapsed = (performance.now() - startedAt) / 1000;
-            const percent = Math.min(99, Math.floor((elapsed / durationSec) * 100));
-            toast.innerText = `ভিডিও তৈরি হচ্ছে... ${percent}%`;
-        }, 100);
+        const wallStart = performance.now();
+        const totalFrames = Math.max(1, Math.round(durationSec * FPS));
+        let frameIndex = 0;
 
-        stopTimer = setTimeout(() => {
-            if (recordingStopped) return;
-            recordingStopped = true;
-            isRecording = false;
-            if (frameTimer) clearTimeout(frameTimer);
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
+        // Draw/write exactly 30 frames per second.
+        const writeGeneratorFrame = async (timestampUs) => {
+            renderCardContent(rCtx, scale, performance.now());
+            const frame = new VideoFrame(recCanvas, {
+                timestamp: timestampUs,
+                alpha: 'discard'
+            });
+            await generatorWriter.write(frame);
+            frame.close();
+        };
+
+        const stopRecording = async () => {
+            try {
+                if (generatorWriter) {
+                    try { await generatorWriter.close(); } catch (e) {}
+                }
+            } catch (e) {}
+
+            // Give MediaRecorder a moment to receive the final frame.
+            setTimeout(() => {
+                try {
+                    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                        mediaRecorder.stop();
+                    }
+                } catch (e) {}
+            }, 120);
+        };
+
+        const produceFrames = async () => {
+            while (!stopped && frameIndex < totalFrames) {
+                const targetMs = frameIndex * FRAME_MS;
+                const elapsedMs = performance.now() - wallStart;
+                const waitMs = targetMs - elapsedMs;
+
+                if (waitMs > 1) {
+                    await new Promise(resolve => {
+                        frameTimer = setTimeout(resolve, waitMs);
+                    });
+                }
+
+                if (stopped) return;
+
+                if (useGenerator) {
+                    await writeGeneratorFrame(frameIndex * FRAME_US);
+                } else {
+                    renderCardContent(rCtx, scale, performance.now());
+                    if (typeof videoTrack.requestFrame === 'function') {
+                        videoTrack.requestFrame();
+                    }
+                }
+
+                frameIndex++;
             }
-        }, durationSec * 1000);
+
+            if (!stopped) await stopRecording();
+        };
+
+        progressTimer = setInterval(() => {
+            const elapsed = Math.min(durationSec, (performance.now() - wallStart) / 1000);
+            const percent = Math.min(99, Math.floor((elapsed / durationSec) * 100));
+            toast.innerText = `${isMP4 ? 'YouTube MP4' : 'WebM'} তৈরি হচ্ছে... ${percent}%`;
+        }, 200);
+
+        await produceFrames();
 
     } catch (err) {
         console.error('Video export error:', err);
-
-        if (progressTimer) clearInterval(progressTimer);
-        if (stopTimer) clearTimeout(stopTimer);
         if (frameTimer) clearTimeout(frameTimer);
+        if (progressTimer) clearInterval(progressTimer);
+
+        try {
+            if (generatorWriter) {
+                await generatorWriter.abort(err).catch(() => {});
+            }
+        } catch (e) {}
 
         try {
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
@@ -1165,25 +1183,11 @@ async function exportHDVideo() {
             }
         } catch (e) {}
 
-        try {
-            if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
-        } catch (e) {}
+        try { tempAudio?.pause(); tempAudio.src = ''; } catch (e) {}
+        try { audioCtx?.close(); } catch (e) {}
 
-        if (tempAudio) {
-            try {
-                tempAudio.pause();
-                tempAudio.src = '';
-            } catch (e) {}
-        }
-
-        const msg = String(err && err.message ? err.message : err);
-        if (msg.includes('compatible video recorder')) {
-            toast.innerText = 'এই ব্রাউজারে MP4/H.264 ভিডিও এক্সপোর্ট সাপোর্ট নেই';
-        } else {
-            toast.innerText = 'ভিডিও রেন্ডার করতে সমস্যা হয়েছে';
-        }
-
-        setTimeout(() => toast.style.display = 'none', 3500);
+        toast.innerText = 'ভিডিও তৈরি হয়নি: ' + (err?.message || err);
+        setTimeout(() => toast.style.display = 'none', 6000);
         exportBtn.disabled = false;
     }
 }
