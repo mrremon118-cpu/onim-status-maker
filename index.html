@@ -819,369 +819,374 @@ function downloadOriginalCanvas() {
     }, 'image/png');
 }
 
-// সম্পূর্ণ নিখুঁত ভিডিও এক্সপোর্ট ফাংশন (০ সেকেন্ডে খালি স্ক্রিন বা টেক্সট মিস হওয়ার সমস্যা সমাধান করা হয়েছে)
+// HD video export with H.264 High/Main preference + fixed 30 FPS capture.
 async function exportHDVideo() {
     const toast = document.getElementById('toast');
     const exportBtn = document.getElementById('exportVideoBtn');
-
-    // Prevent a second export while one is already running.
-    if (window.__videoExportRunning) return;
-    window.__videoExportRunning = true;
-
     toast.innerText = 'ভিডিও তৈরি হচ্ছে... ০%';
     toast.style.display = 'block';
     exportBtn.disabled = true;
 
-    let recorder = null;
-    let combinedStream = null;
-    let videoStream = null;
     let audioCtx = null;
-    let exportAudioEl = null;
-    let downloadUrl = null;
-    let renderStopped = false;
+    let tempAudio = null;
+    let mediaRecorder = null;
     let progressTimer = null;
-    let rafId = null;
+    let stopTimer = null;
+    let videoTrack = null;
+    let combinedStream = null;
+    let isRecording = false;
+    let recordLoopRunning = false;
 
     try {
         const durationSec = Math.max(
             1,
-            Math.min(600, parseInt(document.getElementById('videoDurationInput').value) || 10)
+            Math.min(
+                600,
+                parseInt(document.getElementById('videoDurationInput').value, 10) || 10
+            )
         );
 
-        // KEEP ORIGINAL 3:4 RATIO
-        const scale = 3;
+        // Ratio unchanged: 360 x currentCardHeight.
+        // 2x export = 720 x currentCardHeight*2.
+        const scale = 2;
         const recCanvas = document.createElement('canvas');
         recCanvas.width = 360 * scale;
         recCanvas.height = currentCardHeight * scale;
 
-        const rCtx = recCanvas.getContext('2d', { alpha: false });
-        rCtx.imageSmoothingEnabled = true;
-        rCtx.imageSmoothingQuality = 'high';
-
-        // Prepare the first video frame.
-        if (currentMediaType === 'video' && uploadedVideo) {
-            uploadedVideo.pause();
-            try {
-                uploadedVideo.currentTime = 0.1;
-                await new Promise(resolve => {
-                    let finished = false;
-                    const finish = () => {
-                        if (finished) return;
-                        finished = true;
-                        uploadedVideo.removeEventListener('seeked', finish);
-                        resolve();
-                    };
-                    uploadedVideo.addEventListener('seeked', finish, { once: true });
-                    setTimeout(finish, 1000);
-                });
-            } catch (_) {}
-        }
-
-        renderCardContent(rCtx, scale, performance.now());
-
-        if (!recCanvas.captureStream || !window.MediaRecorder) {
-            throw new Error('এই ব্রাউজারে ভিডিও রেকর্ডিং সাপোর্ট নেই');
-        }
-
-        videoStream = recCanvas.captureStream(30);
-        combinedStream = new MediaStream();
-
-        videoStream.getVideoTracks().forEach(track => {
-            combinedStream.addTrack(track);
+        const rCtx = recCanvas.getContext('2d', {
+            alpha: false,
+            desynchronized: false
         });
 
-        /*
-         * Audio:
-         * Create a NEW temporary audio element every export.
-         * This avoids the "MediaElementSource already connected" error
-         * that can happen on the 2nd/3rd export.
-         */
+        // Prepare the first real video frame before recording.
+        if (currentMediaType === 'video' && uploadedVideo) {
+            uploadedVideo.pause();
+
+            await new Promise(resolve => {
+                let done = false;
+
+                const finish = () => {
+                    if (done) return;
+                    done = true;
+                    uploadedVideo.removeEventListener('seeked', finish);
+                    resolve();
+                };
+
+                uploadedVideo.addEventListener('seeked', finish, { once: true });
+
+                try {
+                    const firstTime = Math.min(
+                        0.1,
+                        Math.max(0, (uploadedVideo.duration || 1) - 0.01)
+                    );
+                    uploadedVideo.currentTime = firstTime;
+                } catch (e) {
+                    finish();
+                }
+
+                setTimeout(finish, 1000);
+            });
+
+            if (uploadedVideo.readyState < 2) {
+                await new Promise(resolve => {
+                    let done = false;
+
+                    const finish = () => {
+                        if (done) return;
+                        done = true;
+                        uploadedVideo.removeEventListener('loadeddata', finish);
+                        resolve();
+                    };
+
+                    if (uploadedVideo.readyState >= 2) {
+                        finish();
+                        return;
+                    }
+
+                    uploadedVideo.addEventListener('loadeddata', finish, { once: true });
+                    setTimeout(finish, 1500);
+                });
+            }
+        }
+
+        if (bgAudioUrl) {
+            try {
+                bgAudioEl.pause();
+                bgAudioEl.currentTime = 0;
+            } catch (e) {}
+        }
+
+        // Draw before capture so the first encoded frame is not blank.
+        renderCardContent(rCtx, scale, performance.now());
+        await new Promise(requestAnimationFrame);
+        renderCardContent(rCtx, scale, performance.now());
+
+        // Capture at exactly 30 FPS. The CanvasCaptureMediaStreamTrack is
+        // additionally constrained to 30 FPS where the browser supports it.
+        const stream = recCanvas.captureStream(30);
+        videoTrack = stream.getVideoTracks()[0];
+
+        if (!videoTrack) {
+            throw new Error('ভিডিও ট্র্যাক তৈরি করা যায়নি।');
+        }
+
+        try {
+            await videoTrack.applyConstraints({
+                frameRate: { exact: 30 }
+            });
+        } catch (e) {
+            // Some browsers do not allow applyConstraints on canvas tracks.
+            // captureStream(30) remains the requested capture rate.
+            console.warn('30 FPS constraint:', e);
+        }
+
+        combinedStream = new MediaStream();
+        combinedStream.addTrack(videoTrack);
+
+        // Audio mixing: background audio + optional original video audio.
         try {
             const AudioClass = window.AudioContext || window.webkitAudioContext;
 
-            if (AudioClass && bgAudioUrl) {
+            if (AudioClass) {
                 audioCtx = new AudioClass();
-
-                exportAudioEl = document.createElement('audio');
-                exportAudioEl.src = bgAudioUrl;
-                exportAudioEl.preload = 'auto';
-                exportAudioEl.loop = true;
-                exportAudioEl.playsInline = true;
-                exportAudioEl.muted = false;
-                document.body.appendChild(exportAudioEl);
-
                 const dest = audioCtx.createMediaStreamDestination();
-                const source = audioCtx.createMediaElementSource(exportAudioEl);
-                source.connect(dest);
+                let hasAudio = false;
 
-                if (audioCtx.state === 'suspended') {
-                    await audioCtx.resume().catch(() => {});
+                if (bgAudioUrl) {
+                    tempAudio = document.createElement('audio');
+                    tempAudio.src = bgAudioUrl;
+                    tempAudio.preload = 'auto';
+                    tempAudio.playsInline = true;
+
+                    const aSrc = audioCtx.createMediaElementSource(tempAudio);
+                    aSrc.connect(dest);
+                    hasAudio = true;
                 }
 
-                exportAudioEl.currentTime = 0;
-                await exportAudioEl.play().catch(() => {});
+                if (
+                    currentMediaType === 'video' &&
+                    uploadedVideo &&
+                    uploadedVideo.src &&
+                    !isVideoSoundMuted
+                ) {
+                    const vStream = uploadedVideo.captureStream
+                        ? uploadedVideo.captureStream()
+                        : (
+                            uploadedVideo.mozCaptureStream
+                                ? uploadedVideo.mozCaptureStream()
+                                : null
+                        );
 
-                dest.stream.getAudioTracks().forEach(track => {
-                    combinedStream.addTrack(track);
-                });
-            } else if (
-                AudioClass &&
-                currentMediaType === 'video' &&
-                uploadedVideo &&
-                !isVideoSoundMuted &&
-                uploadedVideo.captureStream
-            ) {
-                // If no background audio is selected, keep the uploaded
-                // video's original sound when the browser exposes it.
-                const vStream = uploadedVideo.captureStream();
-                vStream.getAudioTracks().forEach(track => {
-                    combinedStream.addTrack(track);
-                });
+                    if (vStream && vStream.getAudioTracks().length) {
+                        const videoAudioSource = audioCtx.createMediaStreamSource(vStream);
+                        videoAudioSource.connect(dest);
+                        hasAudio = true;
+                    }
+                }
+
+                if (hasAudio) {
+                    dest.stream.getAudioTracks().forEach(track => {
+                        combinedStream.addTrack(track);
+                    });
+                }
+
+                if (audioCtx.state === 'suspended') {
+                    try { await audioCtx.resume(); } catch (e) {}
+                }
             }
-        } catch (audioError) {
-            console.warn('Audio skipped:', audioError);
+        } catch (e) {
+            console.warn('Audio mixing:', e);
         }
 
-        /*
-         * IMPORTANT:
-         * Prefer REAL MP4 first. WebM is kept only as a browser fallback.
-         * This greatly improves compatibility with Android Gallery/YouTube.
-         */
-        const candidates = [
-            'video/mp4;codecs="avc1.4D401F,mp4a.40.2"',
-            'video/mp4;codecs=avc1,mp4a.40.2',
+        // Prefer H.264 High profile, then H.264 Main profile.
+        // avc1.64001F = H.264 High, Level 3.1
+        // avc1.4D001F = H.264 Main, Level 3.1
+        // If the browser cannot record MP4/H.264, fall back to WebM.
+        const codecCandidates = [
+            'video/mp4;codecs="avc1.64001F,mp4a.40.2"',
+            'video/mp4;codecs="avc1.4D001F,mp4a.40.2"',
+            'video/mp4;codecs="avc1.64001F"',
+            'video/mp4;codecs="avc1.4D001F"',
             'video/mp4',
-            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs="vp9,opus"',
+            'video/webm;codecs="vp8,opus"',
             'video/webm'
         ];
 
         let mimeType = '';
-        for (const type of candidates) {
-            try {
-                if (MediaRecorder.isTypeSupported(type)) {
-                    mimeType = type;
-                    break;
-                }
-            } catch (_) {}
+
+        for (const candidate of codecCandidates) {
+            if (MediaRecorder.isTypeSupported(candidate)) {
+                mimeType = candidate;
+                break;
+            }
         }
 
-        if (!mimeType) throw new Error('ভিডিও format পাওয়া যায়নি');
+        if (!mimeType) {
+            throw new Error('এই ব্রাউজারে কোনো compatible video codec পাওয়া যায়নি।');
+        }
 
-        recorder = new MediaRecorder(combinedStream, {
+        // Higher bitrate keeps Bengali text/details sharper after export.
+        mediaRecorder = new MediaRecorder(combinedStream, {
             mimeType,
-            videoBitsPerSecond: 8000000,
-            audioBitsPerSecond: 160000
+            videoBitsPerSecond: 12000000,
+            audioBitsPerSecond: 192000
         });
 
         const chunks = [];
-        recorder.ondataavailable = e => {
-            if (e.data && e.data.size > 0) chunks.push(e.data);
+        mediaRecorder.ondataavailable = event => {
+            if (event.data && event.data.size > 0) {
+                chunks.push(event.data);
+            }
         };
 
-        const startedAt = performance.now();
+        const startTime = performance.now();
 
-        const renderLoop = () => {
-            if (renderStopped) return;
-            renderCardContent(rCtx, scale, performance.now());
-            rafId = requestAnimationFrame(renderLoop);
-        };
-
-        // Start the source video from the beginning.
-        if (currentMediaType === 'video' && uploadedVideo) {
-            try {
-                uploadedVideo.currentTime = 0.1;
-                await uploadedVideo.play();
-            } catch (_) {}
+        function recordLoop(now) {
+            if (!isRecording || recordLoopRunning === false) return;
+            renderCardContent(rCtx, scale, now);
+            requestAnimationFrame(recordLoop);
         }
 
-        // Start recording only after the first frame is already drawn.
-        recorder.start(1000);
-        renderLoop();
+        mediaRecorder.onstop = () => {
+            isRecording = false;
+            recordLoopRunning = false;
+
+            if (progressTimer) clearInterval(progressTimer);
+            if (stopTimer) clearTimeout(stopTimer);
+
+            try {
+                const finalType = mediaRecorder.mimeType || mimeType;
+                const blob = new Blob(chunks, { type: finalType });
+
+                if (!blob.size) {
+                    throw new Error('ভিডিও ফাইল খালি তৈরি হয়েছে।');
+                }
+
+                const extension = finalType.includes('mp4') ? 'mp4' : 'webm';
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+
+                a.href = url;
+                a.download = `Poetry_Video_${Date.now()}.${extension}`;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+
+                setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+                toast.innerText = extension === 'mp4'
+                    ? 'MP4 ভিডিও সফলভাবে এক্সপোর্ট হয়েছে!'
+                    : 'ভিডিও সফলভাবে এক্সপোর্ট হয়েছে!';
+            } catch (e) {
+                console.error('Video save error:', e);
+                toast.innerText = 'ভিডিও ফাইল তৈরি হয়েছে, কিন্তু সেভ করা যায়নি';
+            }
+
+            if (tempAudio) {
+                try {
+                    tempAudio.pause();
+                    tempAudio.src = '';
+                } catch (e) {}
+            }
+
+            if (audioCtx && audioCtx.state !== 'closed') {
+                audioCtx.close().catch(() => {});
+            }
+
+            if (currentMediaType === 'video' && uploadedVideo) {
+                uploadedVideo.pause();
+                try { uploadedVideo.currentTime = 0.1; } catch (e) {}
+            }
+
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+
+            exportBtn.disabled = false;
+        };
+
+        mediaRecorder.onerror = event => {
+            console.error('MediaRecorder error:', event.error || event);
+        };
+
+        // Final render immediately before recording begins.
+        renderCardContent(rCtx, scale, performance.now());
+
+        mediaRecorder.start(1000);
+        isRecording = true;
+        recordLoopRunning = true;
+
+        if (currentMediaType === 'video' && uploadedVideo) {
+            try { uploadedVideo.currentTime = 0.1; } catch (e) {}
+            uploadedVideo.play().catch(() => {});
+        }
+
+        if (tempAudio) {
+            tempAudio.currentTime = 0;
+            tempAudio.play().catch(() => {});
+        }
+
+        requestAnimationFrame(recordLoop);
 
         progressTimer = setInterval(() => {
-            const elapsed = (performance.now() - startedAt) / 1000;
-            const pct = Math.min(99, Math.floor((elapsed / durationSec) * 100));
-            toast.innerText = `ভিডিও তৈরি হচ্ছে... ${pct}%`;
-        }, 200);
+            const elapsed = (performance.now() - startTime) / 1000;
+            const percent = Math.min(99, Math.floor((elapsed / durationSec) * 100));
+            toast.innerText = `ভিডিও তৈরি হচ্ছে... ${percent}%`;
+        }, 100);
 
-        await new Promise(resolve => setTimeout(resolve, durationSec * 1000));
+        stopTimer = setTimeout(() => {
+            isRecording = false;
+            recordLoopRunning = false;
 
-        clearInterval(progressTimer);
-        progressTimer = null;
-        renderStopped = true;
-        if (rafId) cancelAnimationFrame(rafId);
-
-        // Ask MediaRecorder for its final chunk before stopping.
-        if (recorder.state !== 'inactive') {
-            recorder.requestData();
-            await new Promise(resolve => setTimeout(resolve, 80));
-        }
-
-        await new Promise(resolve => {
-            if (!recorder || recorder.state === 'inactive') {
-                resolve();
-                return;
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
             }
-            recorder.addEventListener('stop', resolve, { once: true });
-            recorder.stop();
-        });
-
-        const finalType = recorder.mimeType || mimeType;
-        const isMp4 = finalType.toLowerCase().includes('mp4');
-        const extension = isMp4 ? 'mp4' : 'webm';
-        const blob = new Blob(chunks, { type: finalType });
-
-        if (!blob || blob.size < 1000) {
-            throw new Error('ভিডিও ফাইল empty হয়েছে');
-        }
-
-        downloadUrl = URL.createObjectURL(blob);
-
-        // Replace the previous download box.
-        const old = document.getElementById('videoDownloadBox');
-        if (old) old.remove();
-
-        const box = document.createElement('div');
-        box.id = 'videoDownloadBox';
-        box.style.cssText =
-            'position:fixed;left:50%;bottom:25px;transform:translateX(-50%);' +
-            'z-index:10000;background:#fff;padding:12px;border-radius:12px;' +
-            'box-shadow:0 10px 30px rgba(0,0,0,.5);width:min(92%,360px);text-align:center;';
-
-        const info = document.createElement('div');
-        info.innerText = `ভিডিও প্রস্তুত (${extension.toUpperCase()})`;
-        info.style.cssText =
-            'color:#111;font-size:12px;font-weight:700;margin-bottom:8px;';
-
-        const btn = document.createElement('a');
-        btn.href = downloadUrl;
-        btn.download = `Poetry_Video_${Date.now()}.${extension}`;
-        btn.innerText = '⬇️ DOWNLOAD VIDEO';
-        btn.style.cssText =
-            'display:block;width:100%;padding:14px;border-radius:9px;' +
-            'background:#e60000;color:#fff;font-size:15px;font-weight:700;' +
-            'text-decoration:none;cursor:pointer;';
-
-        // Keep the Blob URL alive until the user starts another export.
-        btn.addEventListener('click', () => {
-            toast.innerText = 'ভিডিও ডাউনলোড শুরু হয়েছে';
-            setTimeout(() => toast.style.display = 'none', 2500);
-        });
-
-        // OPEN VIDEO: use an in-page video player instead of window.open().
-        // This works more reliably on Android/mobile browsers and file:// pages.
-        const openBtn = document.createElement('button');
-        openBtn.type = 'button';
-        openBtn.innerText = '▶️ OPEN VIDEO';
-        openBtn.style.cssText =
-            'display:block;width:100%;margin-top:7px;padding:10px;border:0;' +
-            'border-radius:8px;background:#eee;color:#111;font-size:12px;' +
-            'font-weight:700;cursor:pointer;';
-
-        openBtn.onclick = () => {
-            const modal = document.createElement('div');
-            modal.style.cssText =
-                'position:fixed;inset:0;z-index:20000;background:rgba(0,0,0,.92);' +
-                'display:flex;align-items:center;justify-content:center;padding:16px;';
-
-            const wrap = document.createElement('div');
-            wrap.style.cssText =
-                'width:min(100%,420px);position:relative;text-align:center;';
-
-            const player = document.createElement('video');
-            player.src = downloadUrl;
-            player.controls = true;
-            player.autoplay = true;
-            player.playsInline = true;
-            player.setAttribute('playsinline', '');
-            player.style.cssText =
-                'display:block;width:100%;max-height:82vh;background:#000;border-radius:10px;';
-
-            const close = document.createElement('button');
-            close.type = 'button';
-            close.innerText = '✕ CLOSE';
-            close.style.cssText =
-                'margin-top:10px;padding:10px 18px;border:0;border-radius:8px;' +
-                'background:#fff;color:#111;font-weight:700;cursor:pointer;';
-
-            const closeModal = () => {
-                try { player.pause(); } catch (_) {}
-                modal.remove();
-            };
-            close.onclick = closeModal;
-            modal.onclick = e => { if (e.target === modal) closeModal(); };
-
-            wrap.appendChild(player);
-            wrap.appendChild(close);
-            modal.appendChild(wrap);
-            document.body.appendChild(modal);
-
-            player.play().catch(() => {});
-        };
-
-        box.appendChild(info);
-        box.appendChild(btn);
-        box.appendChild(openBtn);
-        document.body.appendChild(box);
-
-        toast.innerText = `ভিডিও তৈরি হয়েছে — ${extension.toUpperCase()} ফাইল`;
-        setTimeout(() => toast.style.display = 'none', 3000);
+        }, durationSec * 1000);
 
     } catch (err) {
         console.error('Video export error:', err);
-        toast.innerText = 'ভিডিও তৈরি করতে সমস্যা হয়েছে: ' + (err.message || 'Unknown error');
-        setTimeout(() => toast.style.display = 'none', 4500);
 
-    } finally {
-        // FULL CLEANUP so the next export can start normally.
-        renderStopped = true;
-        if (rafId) cancelAnimationFrame(rafId);
         if (progressTimer) clearInterval(progressTimer);
+        if (stopTimer) clearTimeout(stopTimer);
+
+        isRecording = false;
+        recordLoopRunning = false;
 
         try {
-            if (recorder && recorder.state !== 'inactive') recorder.stop();
-        } catch (_) {}
-
-        try {
-            if (videoStream) {
-                videoStream.getTracks().forEach(track => {
-                    try { track.stop(); } catch (_) {}
-                });
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
             }
-        } catch (_) {}
+        } catch (e) {}
 
-        try {
-            if (combinedStream) {
-                combinedStream.getTracks().forEach(track => {
-                    try { track.stop(); } catch (_) {}
-                });
-            }
-        } catch (_) {}
-
-        try {
-            if (exportAudioEl) {
-                exportAudioEl.pause();
-                exportAudioEl.removeAttribute('src');
-                exportAudioEl.load();
-                exportAudioEl.remove();
-            }
-        } catch (_) {}
-
-        try {
-            if (audioCtx && audioCtx.state !== 'closed') {
-                await audioCtx.close();
-            }
-        } catch (_) {}
-
-        if (currentMediaType === 'video' && uploadedVideo) {
-            try { uploadedVideo.pause(); } catch (_) {}
+        if (tempAudio) {
+            try {
+                tempAudio.pause();
+                tempAudio.src = '';
+            } catch (e) {}
         }
 
+        if (audioCtx && audioCtx.state !== 'closed') {
+            audioCtx.close().catch(() => {});
+        }
+
+        if (combinedStream) {
+            combinedStream.getTracks().forEach(track => {
+                try { track.stop(); } catch (e) {}
+            });
+        }
+
+        toast.innerText = err && err.message
+            ? `ভিডিও এক্সপোর্ট সমস্যা: ${err.message}`
+            : 'ভিডিও রেন্ডার করতে সমস্যা হয়েছে';
+
+        setTimeout(() => {
+            toast.style.display = 'none';
+        }, 4000);
+
         exportBtn.disabled = false;
-        window.__videoExportRunning = false;
     }
 }
-
 function resetDefaults() {
     zoom = 1; posX = 0; posY = 0; brightness = 100; currentCardHeight = 480;
     document.getElementById('zoomRange').value = 1;
